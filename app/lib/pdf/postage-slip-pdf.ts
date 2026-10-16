@@ -91,7 +91,7 @@ export function printable(value: string | null | undefined, charset: Set<number>
   return Array.from(
     String(value ?? "")
       .normalize("NFC")
-      .replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, " ")
+      .replace(/[\s\p{Cc}]+/gu, " ")
       .trim(),
   )
     .map((char) => (charset.has(char.codePointAt(0)!) ? char : "?"))

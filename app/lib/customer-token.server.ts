@@ -10,8 +10,9 @@
  * secret only Liquid and the app know, proves the id. Tokens last a day, so a
  * page rendered earlier (a cached page, a tab left open) still works.
  *
- * Port of Rails `Shopify::CustomerToken`. The Rails version took the shop and
- * read `shop.customer_signing_key`; here the caller passes the key, so this
+ * Port of Rails `Shopify::CustomerToken` (the canonical one: exact string
+ * compare like `secure_compare`). The Rails version read
+ * `shop.customer_signing_key`; here the caller passes the decrypted key, so this
  * stays a pure function (the key lookup is injected in app-proxy.server.ts).
  */
 import { createHmac, timingSafeEqual } from "node:crypto";

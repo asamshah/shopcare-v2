@@ -13,7 +13,7 @@ import {
 } from "../../../app/shopify/catalog-search.server";
 import {
   fetchVariantProperties,
-  ProductFacts,
+  ProductFactsLoader,
 } from "../../../app/shopify/product-facts.server";
 import {
   fetchRepairVariant,
@@ -284,11 +284,11 @@ describe("product facts", () => {
   it("reads tags, type and collections once per instance and caches them", async () => {
     const cache = new MemoryCache();
     const api = new FakeGraphql({ "product(id:": { product } });
-    const facts = new ProductFacts(api, { shopKey: "s", cache });
+    const facts = new ProductFactsLoader(api, { shopKey: "s", cache });
 
     const first = await facts.fetch("10");
     await facts.fetch("10");
-    await new ProductFacts(api, { shopKey: "s", cache }).fetch("10");
+    await new ProductFactsLoader(api, { shopKey: "s", cache }).fetch("10");
 
     expect(first).toEqual({
       productId: "10",
@@ -313,7 +313,7 @@ describe("product facts", () => {
       },
     });
 
-    const facts = await new ProductFacts(api, {
+    const facts = await new ProductFactsLoader(api, {
       shopKey: "s",
       cache: new MemoryCache(),
     }).fetchVariant("100");
@@ -337,10 +337,10 @@ describe("product facts", () => {
     });
     const options = { shopKey: "s", cache, logger: quiet };
 
-    expect(await new ProductFacts(api, options).fetch("10")).toBeNull();
+    expect(await new ProductFactsLoader(api, options).fetch("10")).toBeNull();
     fail = false;
-    expect(await new ProductFacts(api, options).fetch("10")).toBeNull();
-    expect(await new ProductFacts(api, options).fetch("")).toBeNull();
+    expect(await new ProductFactsLoader(api, options).fetch("10")).toBeNull();
+    expect(await new ProductFactsLoader(api, options).fetch("")).toBeNull();
     expect(api.calls).toHaveLength(2);
     expect(quiet.error).toHaveBeenCalled();
   });

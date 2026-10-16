@@ -15,7 +15,7 @@
  * Ids are returned numeric, as Rails stored them; any function taking an id
  * accepts a numeric id or a GID.
  */
-import { buildGid, numericId } from "./gid.server";
+import { buildGid, numericId } from "../lib/gid";
 import {
   adminGraphql,
   assertNoUserErrors,

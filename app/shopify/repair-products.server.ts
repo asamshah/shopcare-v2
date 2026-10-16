@@ -7,7 +7,7 @@
  * Variant and product ids are numeric strings, as RepairService stores them.
  */
 import { cached, defaultShopifyCache, type ShopifyCache } from "./cache.server";
-import { buildGid, numericId } from "./gid.server";
+import { buildGid, numericId } from "../lib/gid";
 import {
   adminGraphql,
   errorSummary,

@@ -14,7 +14,7 @@
  *
  * Recording Items stays with the caller.
  */
-import { buildGid, numericId, numericIdOrNull } from "./gid.server";
+import { buildGid, numericId, numericIdOrNull } from "../lib/gid";
 import {
   adminGraphql,
   errorSummary,

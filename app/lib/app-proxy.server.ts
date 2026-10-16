@@ -14,7 +14,7 @@
  * Writing a route: see `proxyRoute` below and app/routes/proxy.ping.tsx.
  */
 import { authenticate } from "../shopify.server";
-import { verifiedCustomerId } from "../services/shopify/customer-token.server";
+import { verifiedCustomerId } from "./customer-token.server";
 import { jsonResponse, liquidResponse, type CachePolicy } from "./http.server";
 import {
   memoryThrottleStore,

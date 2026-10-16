@@ -1,7 +1,7 @@
 /**
  * Product details ShopCare decides things on:
  *
- * - ProductFacts (Rails `Warranty::ProductFacts`): tags, product type and
+ * - ProductFactsLoader (Rails `Warranty::ProductFacts`): tags, product type and
  *   collections, which warranty and Care eligibility are decided on, plus the
  *   variant title/SKU when a customer registers a product. Memoised per
  *   instance and cached briefly, since recording one order can ask about the
@@ -10,9 +10,14 @@
  * - fetchVariantProperties (Rails `Parts::ItemProperties#fetch`): size and
  *   colour from the variant's options, and the model from a product
  *   metafield, which parts are matched on.
+ *
+ * The `ProductFacts` shape and the rules decided on it (product groups,
+ * eligibility) are pure and live in app/models (product-facts.ts,
+ * product-group.server.ts); this module only fetches.
  */
 import { cached, defaultShopifyCache, type ShopifyCache } from "./cache.server";
-import { buildGid, numericId } from "./gid.server";
+import { buildGid, numericId } from "../lib/gid";
+import type { ProductFacts } from "../models/product-facts";
 import {
   adminGraphql,
   errorSummary,
@@ -39,18 +44,6 @@ export const VARIANT_FACTS_QUERY = `#graphql
   }
 `;
 
-export interface ProductFactsData {
-  productId: string;
-  title: string;
-  productType: string;
-  tags: string[];
-  /** Numeric collection ids. */
-  collectionIds: string[];
-  variantId?: string;
-  variantTitle?: string;
-  sku?: string | null;
-}
-
 interface ProductNode {
   id: string;
   title: string;
@@ -68,8 +61,8 @@ export interface ProductFactsOptions {
   logger?: Pick<Console, "error">;
 }
 
-export class ProductFacts {
-  private memo = new Map<string, Promise<ProductFactsData | null>>();
+export class ProductFactsLoader {
+  private memo = new Map<string, Promise<ProductFacts | null>>();
   private cache: ShopifyCache;
   private logger: Pick<Console, "error">;
 
@@ -84,7 +77,7 @@ export class ProductFacts {
   /** Facts for a product (numeric id), or null if Shopify doesn't know it. */
   fetch(
     productId: string | null | undefined,
-  ): Promise<ProductFactsData | null> {
+  ): Promise<ProductFacts | null> {
     if (!productId) return Promise.resolve(null);
     const id = String(productId);
     let pending = this.memo.get(id);
@@ -107,7 +100,7 @@ export class ProductFacts {
   /** Facts for a variant (numeric id), including its title and SKU. */
   fetchVariant(
     variantId: string | null | undefined,
-  ): Promise<ProductFactsData | null> {
+  ): Promise<ProductFacts | null> {
     if (!variantId) return Promise.resolve(null);
     const id = String(variantId);
     return this.guard(() =>
@@ -137,15 +130,15 @@ export class ProductFacts {
   private cachedLoad(
     kind: string,
     id: string,
-    load: () => Promise<ProductFactsData | null>,
+    load: () => Promise<ProductFacts | null>,
   ) {
     const key = `product-facts:${this.options.shopKey}:${kind}:${id}`;
     return cached(this.cache, key, PRODUCT_FACTS_TTL_MS, load);
   }
 
   private async guard(
-    load: () => Promise<ProductFactsData | null>,
-  ): Promise<ProductFactsData | null> {
+    load: () => Promise<ProductFacts | null>,
+  ): Promise<ProductFacts | null> {
     try {
       return await load();
     } catch (error) {
@@ -157,7 +150,7 @@ export class ProductFacts {
   }
 }
 
-function build(product: ProductNode): ProductFactsData {
+function build(product: ProductNode): ProductFacts {
   return {
     productId: numericId(product.id),
     title: product.title,

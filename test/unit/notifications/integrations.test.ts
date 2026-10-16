@@ -5,21 +5,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import {
-  CUSTOMER_CONSENT_QUERY,
-  shopifyMarketingConsent,
-} from "../../../app/services/notifications/consent.server";
+import { shopifyMarketingConsent } from "../../../app/services/notifications/consent.server";
 import { DeliveryError } from "../../../app/services/notifications/delivery-error.server";
 import {
   EVENTS,
   type EventData,
   type EventName,
 } from "../../../app/services/notifications/events.server";
+import { FlowClient } from "../../../app/services/notifications/flow-client.server";
+import { CUSTOMER_MARKETING_CONSENT_QUERY } from "../../../app/shopify/customers.server";
 import {
-  FlowClient,
+  InvalidFlowCustomerIdError,
+  flowCustomerId,
   flowPayload,
-  numericCustomerId,
-} from "../../../app/services/notifications/flow-client.server";
+} from "../../../app/shopify/flow.server";
 import {
   KLAVIYO_REVISION,
   KlaviyoClient,
@@ -184,7 +183,7 @@ describe("FlowClient", () => {
     const fake = new FakeGraphql({
       flowTriggerReceive: { flowTriggerReceive: { userErrors: [] } },
     });
-    await new FlowClient(fake.graphql).trigger("shopcare-care-offer", {
+    await new FlowClient(fake).trigger("shopcare-care-offer", {
       customerId: "77",
       fields: { "Product title": "Boot", "Care price": 15.0 },
     });
@@ -210,7 +209,7 @@ describe("FlowClient", () => {
       },
     });
     await expect(
-      new FlowClient(userErrors.graphql).trigger("h", {
+      new FlowClient(userErrors).trigger("h", {
         customerId: null,
         fields: {},
       }),
@@ -221,21 +220,31 @@ describe("FlowClient", () => {
         status: 200,
       });
     await expect(
-      new FlowClient(throttled).trigger("h", { customerId: null, fields: {} }),
+      new FlowClient({ graphql: throttled }).trigger("h", { customerId: null, fields: {} }),
     ).rejects.toThrow("Throttled");
 
     const down = async () => new Response("", { status: 503 });
     await expect(
-      new FlowClient(down).trigger("h", { customerId: null, fields: {} }),
+      new FlowClient({ graphql: down }).trigger("h", { customerId: null, fields: {} }),
     ).rejects.toMatchObject({ retryable: true });
   });
 
   it("builds payloads with and without a customer", () => {
     expect(flowPayload(null, { a: "1" })).toEqual({ a: "1" });
     expect(flowPayload("", { a: "1" })).toEqual({ a: "1" });
-    expect(flowPayload(5, { a: "1" })).toEqual({ customer_id: 5, a: "1" });
-    expect(numericCustomerId("gid://shopify/Customer/123")).toBe(123);
-    expect(() => numericCustomerId("abc")).toThrow(DeliveryError);
+    expect(flowPayload("5", { a: "1" })).toEqual({ customer_id: 5, a: "1" });
+    expect(flowCustomerId("gid://shopify/Customer/123")).toBe(123);
+    // Beyond a JS number's exact range: sent as digits, never rounded.
+    expect(flowCustomerId("90071992547409930")).toBe("90071992547409930");
+    expect(() => flowCustomerId("abc")).toThrow(InvalidFlowCustomerIdError);
+  });
+
+  it("an invalid customer id is a permanent DeliveryError", async () => {
+    const fake = new FakeGraphql({});
+    await expect(
+      new FlowClient(fake).trigger("h", { customerId: "abc", fields: {} }),
+    ).rejects.toMatchObject({ name: "DeliveryError", retryable: false });
+    expect(fake.calls).toHaveLength(0);
   });
 });
 
@@ -303,7 +312,7 @@ describe("shopifyMarketingConsent", () => {
           customer:
             address === undefined ? null : { defaultEmailAddress: address },
         },
-      }).graphql,
+      }),
     );
 
   it("is true only for SUBSCRIBED, for the same address", async () => {
@@ -342,7 +351,7 @@ describe("shopifyMarketingConsent", () => {
         customer: { defaultEmailAddress: { marketingState: "SUBSCRIBED" } },
       },
     });
-    const check = shopifyMarketingConsent(fake.graphql);
+    const check = shopifyMarketingConsent(fake);
 
     await expect(
       check({ customerId: null, email: "g@example.com" }),
@@ -350,7 +359,7 @@ describe("shopifyMarketingConsent", () => {
     expect(fake.calls).toHaveLength(0);
 
     await check({ customerId: "77" });
-    expect(fake.calls[0].query).toBe(CUSTOMER_CONSENT_QUERY);
+    expect(fake.calls[0].query).toBe(CUSTOMER_MARKETING_CONSENT_QUERY);
     expect(fake.calls[0].variables).toEqual({
       id: "gid://shopify/Customer/77",
     });

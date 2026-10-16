@@ -4,7 +4,7 @@
  * products. Ported from Rails `Shopify::DiscountCodes`.
  */
 import { randomInt } from "node:crypto";
-import { buildGid } from "./gid.server";
+import { buildGid } from "../lib/gid";
 import {
   adminGraphql,
   assertNoUserErrors,

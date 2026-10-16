@@ -11,7 +11,7 @@ import {
   type AppProxyDeps,
 } from "../../app/lib/app-proxy.server";
 import { memoryThrottleStore } from "../../app/lib/proxy-throttling.server";
-import { signCustomerToken } from "../../app/services/shopify/customer-token.server";
+import { signCustomerToken } from "../../app/lib/customer-token.server";
 
 const shop = "orders-test.myshopify.com";
 const key = "k".repeat(64);

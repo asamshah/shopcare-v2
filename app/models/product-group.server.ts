@@ -9,7 +9,7 @@ import type { ProductGroup } from "@prisma/client";
 import prisma from "../db.server";
 import type { Db } from "../lib/db-lock.server";
 import { toSentence } from "../lib/inflections";
-import { buildGid, numericId } from "../services/shopify/gid.server";
+import { buildGid, numericId } from "../lib/gid";
 import type { ProductFacts } from "./product-facts";
 import {
   assertValid,

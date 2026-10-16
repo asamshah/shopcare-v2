@@ -3,7 +3,7 @@
  * payment, using Shopify's suggested refund transactions. Ported from Rails
  * `Care::PlanRefunder`; the caller passes the ids and the note.
  */
-import { buildGid } from "./gid.server";
+import { buildGid } from "../lib/gid";
 import {
   adminGraphql,
   assertNoUserErrors,

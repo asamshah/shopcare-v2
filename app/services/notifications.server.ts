@@ -38,10 +38,8 @@ import {
   type EventData,
   type EventName,
 } from "./notifications/events.server";
-import {
-  FlowClient,
-  type AdminGraphql,
-} from "./notifications/flow-client.server";
+import type { AdminGraphqlClient } from "../shopify/graphql.server";
+import { FlowClient } from "./notifications/flow-client.server";
 import { KlaviyoClient } from "./notifications/klaviyo-client.server";
 import {
   isEmailEnabled,
@@ -66,7 +64,7 @@ export interface NotificationDeps {
     context: { shopId: string },
   ): Promise<boolean>;
   /** An Admin GraphQL client for the shop (offline session), for Flow triggers. */
-  adminGraphql(shopId: string): Promise<AdminGraphql>;
+  adminClient(shopId: string): Promise<AdminGraphqlClient>;
   /**
    * The one-click unsubscribe URL for a marketing email. Without one the
    * marketing email is skipped.
@@ -266,8 +264,8 @@ async function deliverTo(
       if (!settings.flowEnabled) return skip("Shopify Flow is turned off");
       if (!def.staffAlert && !recipient.customerId)
         return skip("No Shopify customer to attach the trigger to");
-      const graphql = await deps.adminGraphql(delivery.shopId);
-      await new FlowClient(graphql).trigger(def.flowHandle, {
+      const client = await deps.adminClient(delivery.shopId);
+      await new FlowClient(client).trigger(def.flowHandle, {
         customerId: def.staffAlert ? null : recipient.customerId,
         fields,
       });

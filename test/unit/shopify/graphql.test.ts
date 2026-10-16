@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildGid, numericId } from "../../../app/shopify/gid.server";
+import { buildGid, numericId } from "../../../app/lib/gid";
 import {
   adminGraphql,
   assertNoUserErrors,

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   signCustomerToken,
   verifiedCustomerId,
-} from "../../app/services/shopify/customer-token.server";
+} from "../../app/lib/customer-token.server";
 
 const key = "k".repeat(64);
 const now = new Date("2026-10-16T12:00:00Z");

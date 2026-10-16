@@ -7,7 +7,7 @@
  * `Repairs::CatalogSearch`.
  */
 import { cached, defaultShopifyCache, type ShopifyCache } from "./cache.server";
-import { numericId } from "./gid.server";
+import { numericId } from "../lib/gid";
 import {
   adminGraphql,
   errorSummary,

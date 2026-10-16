@@ -113,7 +113,7 @@ export function buildDeps(overrides: Partial<NotificationDeps> = {}) {
     store,
     loadSettings: vi.fn(async () => settings.current),
     hasEmailMarketingConsent: vi.fn(async () => true),
-    adminGraphql: vi.fn(async () => graphql.graphql),
+    adminClient: vi.fn(async () => graphql),
     unsubscribeUrl: vi.fn(
       () => "https://shopcare.test/unsubscribe?token=abc",
     ) as NotificationDeps["unsubscribeUrl"],

@@ -3,7 +3,7 @@
  * credit). Ported from the store-credit half of Rails `TradeIns::CreditIssuer`;
  * choosing between store credit and a discount code stays with the caller.
  */
-import { buildGid } from "./gid.server";
+import { buildGid } from "../lib/gid";
 import {
   adminGraphql,
   assertNoUserErrors,

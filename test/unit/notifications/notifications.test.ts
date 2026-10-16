@@ -468,7 +468,7 @@ describe("deliverNotification: Shopify Flow", () => {
         },
       },
     });
-    vi.mocked(ctx.deps.adminGraphql).mockResolvedValue(ctx.graphql.graphql);
+    vi.mocked(ctx.deps.adminClient).mockResolvedValue(ctx.graphql);
     ctx.settings.current.emails = { care_welcome: { enabled: false } };
     const [delivery] = await emit("care_activated", careActivated());
 

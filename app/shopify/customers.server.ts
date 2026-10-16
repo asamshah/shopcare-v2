@@ -10,7 +10,7 @@
  *   `GET/POST customers/:id/metafields`; this reads `customer.metafield` and
  *   writes with `metafieldsSet`.
  */
-import { buildGid } from "./gid.server";
+import { buildGid } from "../lib/gid";
 import {
   adminGraphql,
   assertNoUserErrors,

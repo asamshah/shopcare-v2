@@ -35,7 +35,7 @@ the row in the same commit as the code.
 | `shopify.app.toml` | `shopify.app.toml` | done | scopes, app proxy (`apps`/`repairs` → `/proxy`), compliance webhooks. client_id is blank until linked |
 | `config/initializers/shopify_app.rb` (runtime webhooks) | `[[webhooks.subscriptions]]` in `shopify.app.toml` | done | app/uninstalled, orders/paid, refunds/create, 3 compliance topics; API version 2025-10 → 2026-10 |
 | `config/initializers/shopify_app.rb` (`after_authenticate_job`) | `hooks.afterAuth` in `app/shopify.server.ts` → `setUpShopAfterAuth` (app/services/shops/after-auth.server.ts) | wip | creates/reactivates the Shop row and ensures the customer signing key (encrypted column + app-data metafield). Wave 2: enqueue the order backfill (`OrderImporter.importRecent`) |
-| `config/routes.rb` | `app/routes/*` (flat routes) | todo | proxy paths unchanged: `/proxy/intake`, `/proxy/status`, `/proxy/quotes/:token` (+ `/decline`), `/proxy/orders`, `/proxy/catalog_search`, `/proxy/order_lookup`, `/proxy/care_plans`, `/proxy/care_offers`, `/proxy/trade_in_options`, `/proxy/trade_ins` |
+| `config/routes.rb` | `app/routes/*` (flat routes) | wip | proxy paths unchanged: `/proxy/intake`, `/proxy/status`, `/proxy/quotes/:token` (+ `/decline`), `/proxy/orders`, `/proxy/catalog_search`, `/proxy/order_lookup`, `/proxy/care_plans`, `/proxy/care_offers`, `/proxy/trade_in_options`, `/proxy/trade_ins`; all proxy routes done (w2-proxy) |
 | `db/schema.rb` + `db/migrate/*` (26) | `prisma/schema.prisma` + `prisma/migrations/` | done | every domain table in one migration (`…_domain_schema`) on top of the template's `Session` migration; see [Schema notes](#schema-notes). Email settings go in `shops.settings` when the notifications are built |
 | `config/recurring.yml` `expire_quotes` (daily 3am) | `netlify/functions/daily-expire-quotes.mts` → job `expire-quotes` | done | 03:00 UTC; replaced the `daily-example.mts` template |
 | `config/storage.yml` (Disk / S3) | `app/lib/storage.server.ts` | done | Netlify Blobs; signed URLs served by `app/routes/files.$.tsx` |
@@ -397,7 +397,7 @@ the model layer.
 | `app/services/care/refund_handler.rb` | app/services/care/refund-handler.server.ts | done | `handleCareRefund`; Shopify client and shop currency resolved lazily |
 | `app/services/items/order_data.rb` | app/shopify/orders.server.ts | done | `orderFromGraphql` / `orderFromWebhook` → `OrderData`; unit price is a decimal string |
 | `app/services/items/order_importer.rb` | app/services/items/order-importer.server.ts | done | `OrderImporter.importOrder` / `importRecent` over `fetchCustomerOrder` / `fetchRecentPaidOrders`. The backfill job (cursor-paged, re-enqueue) is wave 2 |
-| `app/services/items/owned_item_resolver.rb` | app/services/items/owned-item-resolver.server.ts | todo |  |
+| `app/services/items/owned_item_resolver.rb` | app/services/storefront/owned-item-resolver.server.ts | done | storefront-only caller; imports an old order on demand via `OrderImporter` |
 | `app/services/items/recorder.rb` | app/services/items/recorder.server.ts | done | `ItemRecorder`; product facts fetched before the transaction; unique (shop, line, unit) makes concurrent webhooks safe |
 | `app/services/items/refund_processor.rb` | app/services/items/refund-processor.server.ts | done | `processRefund`; processed_refunds claim via `INSERT … ON CONFLICT DO NOTHING` in the same transaction; line ids from GIDs when present |
 | `app/services/items/registration_submission.rb` | app/services/items/registration-submission.server.ts | todo |  |
@@ -417,10 +417,10 @@ the model layer.
 | `app/services/repairs/catalog_search.rb` | app/shopify/catalog-search.server.ts | done | `searchCatalog`; the caller passes repair-service + Care plan variant ids as `excludedVariantIds` |
 | `app/services/repairs/customer_redactor.rb` | app/services/gdpr/customer-redactor.server.ts (+ customer-match.server.ts) | done | v2 also redacts photos (files), free-text activity bodies, decline reasons, item properties, registration proofs/notes, trade-in staff notes + photos, notification payloads; matches `orders_to_redact` too |
 | `app/services/repairs/event_payload.rb` | app/services/repairs/event-payload.server.ts | done | takes plain ticket/quotation objects |
-| `app/services/repairs/intake_submission.rb` | app/services/repairs/intake-submission.server.ts | todo |  |
+| `app/services/repairs/intake_submission.rb` | app/services/repairs/intake-submission.server.ts | done | `submitIntake`; photos → storage (type/size from TicketImage, `settings.intake.max_images`, best effort); emits outbound webhook `submitted` + `repair_submitted` notification; validation errors keep Rails' "Validation failed: …" text |
 | `app/services/repairs/order_lookup.rb` | app/services/repairs/order-lookup.server.ts | done | `lookUpOrder` (records Items, one per line, images) + `orderToken` / `verifiedOrderId` (HMAC-signed, 2 h, per shop; key derived from APP_ENCRYPTION_KEY) |
 | `app/services/repairs/payment_processor.rb` | app/services/payments/repair-payment.server.ts | done | `processRepairPayment` |
-| `app/services/repairs/product_cards.rb` | app/services/repairs/product-cards.server.ts | todo |  |
+| `app/services/repairs/product_cards.rb` | app/services/storefront/product-cards.server.ts | done | `ProductCards.load` + `coverJson` |
 | `app/services/repairs/product_catalog.rb` | app/shopify/repair-products.server.ts | done | `listRepairVariants` (cached), `fetchRepairVariants` (paged, errors propagate: for ServiceSync), `fetchRepairVariant`; settings passed in |
 | `app/services/repairs/purchase_history.rb` | app/shopify/orders.server.ts | done | `fetchPurchaseHistory` |
 | `app/services/repairs/quote_canceller.rb` | app/services/quotes/cancel.server.ts | done | contract `cancelOpenQuotesForTicket({ shopId, ticketId, actor })` |
@@ -446,15 +446,15 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/controllers/proxy/base_controller.rb` | app/lib/app-proxy.server.ts | wip | `authenticateProxy` + `proxyRoute` done (see [App Proxy routes](#app-proxy-routes)); needs integration wiring: `customerSigningKey`, `rememberPathPrefix`, Postgres throttle store |
-| `app/controllers/proxy/care_controller.rb` | app/routes/proxy.care_plans.tsx, proxy.care_offers.tsx | todo | care_plans is public per product → CDN-cacheable (Netlify-Vary: query=shop\|product_id); care_offers is per customer → no-store |
-| `app/controllers/proxy/catalog_controller.rb` | app/routes/proxy.catalog_search.tsx | todo | public catalogue facts → CDN-cacheable on query; keep throttling |
-| `app/controllers/proxy/intake_controller.rb` | app/routes/proxy.intake.tsx | todo | POST multipart; photos → storage.server.ts |
-| `app/controllers/proxy/order_lookups_controller.rb` | app/routes/proxy.order_lookup.tsx | todo | POST, rate-limited |
-| `app/controllers/proxy/orders_controller.rb` | app/routes/proxy.orders.tsx | todo | per customer → no-store |
-| `app/controllers/proxy/quotes_controller.rb` | app/routes/proxy.quotes.$token.tsx (+ .decline) | todo | renders an HTML page through the proxy (views/proxy/quotes/show) → return Liquid/HTML with Content-Type application/liquid |
-| `app/controllers/proxy/status_controller.rb` | app/routes/proxy.status.tsx | todo | per customer → no-store |
-| `app/controllers/proxy/trade_ins_controller.rb` | app/routes/proxy.trade_in_options.tsx, proxy.trade_ins.tsx | todo | trade_in_options public per shop → cacheable |
+| `app/controllers/proxy/base_controller.rb` | app/lib/app-proxy.server.ts + app/services/storefront/deps.server.ts | done | `proxyRoute`; `storefrontRoute` adds Rails `set_shop` (404 without a Shop row) and swappable deps (`configureStorefront`) |
+| `app/controllers/proxy/care_controller.rb` | app/routes/proxy.care_plans.tsx, proxy.care_offers.tsx | done | care_plans public, CDN-cached (Netlify-Vary: shop\|product_id\|product_title, 300 s); care_offers no-store |
+| `app/controllers/proxy/catalog_controller.rb` | app/routes/proxy.catalog_search.tsx | done | throttled (60/IP, 1200/shop per minute); public, CDN-cached on `q` (300 s) |
+| `app/controllers/proxy/intake_controller.rb` | app/routes/proxy.intake.tsx | done | multipart; `images[]` (or `images`) → storage |
+| `app/controllers/proxy/order_lookups_controller.rb` | app/routes/proxy.order_lookup.tsx | done | throttled (10/IP, 300/shop per 10 min); generic 404; guests get the 2 h signed `order_token` |
+| `app/controllers/proxy/orders_controller.rb` | app/routes/proxy.orders.tsx | done | no-store |
+| `app/controllers/proxy/quotes_controller.rb` | app/routes/proxy.quotes.$token.tsx, proxy.quotes.$token_.decline.tsx (app/services/storefront/quote-routes.server.ts) | done | Liquid in the theme layout; Cache-Control is `private, no-store` (Rails: `no-store`); decline/expire call the contract's `declineQuote`/`expireQuote` |
+| `app/controllers/proxy/status_controller.rb` | app/routes/proxy.status.tsx | done | no-store |
+| `app/controllers/proxy/trade_ins_controller.rb` | app/routes/proxy.trade_in_options.tsx, proxy.trade_ins.tsx | wip | flag check ported (404 `{ok:false, available:false, errors}`); flag-on path waits for w2-backend's TradeIns Quoter/Submission and stays parked meanwhile |
 
 ### Controllers: admin (embedded) (22)
 
@@ -528,7 +528,7 @@ the model layer.
 | `app/views/product_groups/edit.html.erb` | app/routes/app.product_groups* (component) | todo |  |
 | `app/views/product_groups/index.html.erb` | app/routes/app.product_groups* (component) | todo |  |
 | `app/views/product_groups/new.html.erb` | app/routes/app.product_groups* (component) | todo |  |
-| `app/views/proxy/quotes/show.html.erb` | app/routes/proxy.quotes.$token.tsx | todo | storefront quote review page via App Proxy |
+| `app/views/proxy/quotes/show.html.erb` | app/services/storefront/quote-page.server.ts | done | `renderQuotePage`, every value through `liquidText` |
 | `app/views/repair_services/_service.html.erb` | app/routes/app.repair_services* (component) | todo |  |
 | `app/views/repair_services/edit.html.erb` | app/routes/app.repair_services* (component) | todo |  |
 | `app/views/repair_services/index.html.erb` | app/routes/app.repair_services* (component) | todo |  |
@@ -606,7 +606,7 @@ the model layer.
 | `test/services/parts/reorder_and_sync_test.rb` | test/integration/services/parts/reorder-and-sync.test.ts | todo |  |
 | `test/services/repairs/customer_redactor_test.rb` | test/integration/webhooks.test.ts (customers/redact) | done | plus a completeness test over every PII location |
 | `test/services/repairs/event_payload_test.rb` | test/unit/repairs/outbound-webhook.test.ts | done |  |
-| `test/services/repairs/intake_submission_test.rb` | test/integration/services/repairs/intake-submission.test.ts | todo |  |
+| `test/services/repairs/intake_submission_test.rb` | test/integration/routes/proxy-intake.test.ts | done | covered end to end through the route (verification, import, token, duplicate, cover log, photos, webhook, notification) |
 | `test/services/repairs/order_lookup_and_catalog_test.rb` | test/integration/services/repairs/order-lookup.test.ts + test/unit/shopify/{products,orders}.test.ts | done | lookup + Items + token in integration; catalogue + normalising in unit |
 | `test/services/repairs/payment_processor_test.rb` | test/integration/services/payments/repair-payment.test.ts | done | adds concurrent deliveries, draft-order fallback, cross-shop |
 | `test/services/repairs/product_catalog_test.rb` | test/unit/shopify/products.test.ts | done |  |
@@ -639,15 +639,15 @@ the model layer.
 | `test/integration/admin_quotes_test.rb` | test/integration/routes/admin-quotes.test.ts | todo |  |
 | `test/integration/admin_repair_services_test.rb` | test/integration/routes/admin-repair-services.test.ts | todo |  |
 | `test/integration/admin_smoke_test.rb` | test/integration/routes/admin-smoke.test.ts | todo |  |
-| `test/integration/care_plans_test.rb` | test/integration/routes/care-plans.test.ts | todo |  |
+| `test/integration/care_plans_test.rb` | test/integration/routes/proxy-care.test.ts | wip | storefront test ported (split into 5); admin screens are w2-admin's |
 | `test/integration/product_groups_test.rb` | test/integration/routes/product-groups.test.ts | todo |  |
-| `test/integration/proxy_find_product_test.rb` | test/integration/routes/proxy-find-product.test.ts | todo |  |
-| `test/integration/proxy_intake_test.rb` | test/integration/routes/proxy-intake.test.ts | todo |  |
-| `test/integration/proxy_orders_test.rb` | test/integration/routes/proxy-orders.test.ts | todo |  |
-| `test/integration/proxy_quotes_test.rb` | test/integration/routes/proxy-quotes.test.ts | todo |  |
-| `test/integration/proxy_status_test.rb` | test/integration/routes/proxy-status.test.ts | todo |  |
+| `test/integration/proxy_find_product_test.rb` | test/integration/routes/proxy-find-product.test.ts | done | 7/7; Admin API faked instead of stubbing services |
+| `test/integration/proxy_intake_test.rb` | test/integration/routes/proxy-intake.test.ts | done | 5/5 + 9 IntakeSubmission cases |
+| `test/integration/proxy_orders_test.rb` | test/integration/routes/proxy-orders.test.ts | done | 10/10 + uninstalled shop |
+| `test/integration/proxy_quotes_test.rb` | test/integration/routes/proxy-quotes.test.ts | done | 9/9 + choice=decline; decisions via a stand-in until w2-backend's service lands |
+| `test/integration/proxy_status_test.rb` | test/integration/routes/proxy-status.test.ts | done | 5/5 |
 | `test/integration/setup_test.rb` | test/integration/routes/setup.test.ts | todo |  |
-| `test/integration/trade_ins_test.rb` | test/integration/routes/trade-ins.test.ts | todo |  |
+| `test/integration/trade_ins_test.rb` | test/integration/routes/proxy-trade-ins.test.ts | wip | storefront flag-off case ported; flag-on storefront cases wait for Quoter/Submission; admin cases are w2-admin's |
 
 ### Tests: support and helpers (6)
 
@@ -664,7 +664,7 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `test/fixtures/files/repair.png` | test/support/factories.ts | todo | copy when intake tests are ported |
+| `test/fixtures/files/repair.png` | test/support/proxy-routes.ts | done | `pngFile()` (1×1 PNG) |
 | `test/fixtures/shops.yml` | test/support/factories.ts | todo | → factory `createShop` in test/support/factories.ts |
 
 ### Tests: storefront (3)
@@ -673,7 +673,7 @@ the model layer.
 |---|---|---|---|
 | `test/storefront/package-lock.json` | test/storefront/ | todo | drop |
 | `test/storefront/package.json` | test/storefront/ | todo | fold devDeps (jsdom, liquidjs) into root |
-| `test/storefront/storefront.test.js` | test/storefront/ | todo | Liquid+jsdom journeys over extensions/repair-intake; port as a Vitest project (environment: jsdom) or keep as a node script |
+| `test/storefront/storefront.test.js` | test/storefront/ | todo | Liquid+jsdom journeys over extensions/repair-intake; port as a Vitest project (environment: jsdom) or keep as a node script; its proxy mocks are replayed against the real routes in test/integration/routes/extension-contract.test.ts |
 
 ### Tests: helper (1)
 

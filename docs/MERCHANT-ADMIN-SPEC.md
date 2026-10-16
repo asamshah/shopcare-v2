@@ -84,11 +84,16 @@ TicketActivity           (replaces Odoo chatter)
 ## 4. Status pipeline (state machine)
 
 ```
-new ──▶ assessing ──▶ quoted ──▶ in_repair ──▶ ready ──▶ completed
-  │          ▲          │
+new ──▶ assessing ──▶ quoted ──paid / £0──▶ awaiting_item ──Mark received──▶ received ──▶ in_repair ──▶ ready ──▶ completed
+  │          ▲          │    (postage slip emailed)                                           ▲
+  │          │          └──paid / £0, item already received (Mark received earlier)────────────┘
   │          └── quote_declined (revise → assessing)
   └────────────────▶ cancelled / rejected
 ```
+
+Staff can still move a ticket to any status from the Status menu; choosing
+`awaiting_item` emails the postage slip (once per ticket) and choosing `received`
+records the arrival like **Mark received**.
 
 Quotation (the Shopify invoice is the quote; paying it is accepting it):
 
@@ -109,13 +114,20 @@ link stops working; sending again creates a new one.
 - `assessing` — staff reviewing photos/description
 - `quoted` — quote sent: Shopify emailed its invoice; paying it accepts the quote
 - `quote_declined` — the customer declined the quote (optional reason) or it expired unpaid; staff revise and re-send
-- `in_repair` — payment received (via `orders/paid` webhook), repair underway
+- `awaiting_item` — quote paid (via `orders/paid`) or £0 covered; the customer has been
+  emailed a **postage slip** (PDF: cut-out address label to the workshop, packing slip
+  with a QR code to the ticket, posting instructions) and is posting the item. Customers
+  pay their own postage in V1
+- `received` — staff clicked **Mark received**: the parcel arrived; the customer is
+  emailed "We've received your item". Staff then move it to `in_repair`
+- `in_repair` — repair underway (straight after payment when the item was already received)
 - `ready` — repaired, ready to ship / collect
 - `completed` — shipped/collected, closed
 - `cancelled` / `rejected` — terminal
 
 **Warranty path:** a £0 quote skips payment — auto-completes the draft order (existing
-`completeDraftOrder`) and moves ticket straight `quoted → in_repair`, no customer email.
+`completeDraftOrder`) and moves the ticket `quoted → awaiting_item` (postage slip
+emailed) or, when the item was already received, `quoted → in_repair`. No invoice email.
 
 **Customer-facing metafield mapping** (existing sync): `quoted/in_repair → "requested"`,
 payment → `"paid"`. Extend to surface full status in the customer portal later.
@@ -154,12 +166,12 @@ payment → `"paid"`. Extend to surface full status in the customer portal later
   4. the **review page** shows the lines, total, expiry, **Pay now** (the invoice) and
      **Decline** (optional reason) → `declined`, ticket → `quote_declined`, draft order
      deleted. Unpaid past its expiry → `expired` the same way (daily job, or when opened).
-- **Send Quote** (£0, warranty / Care) → `createDraftOrder` + `completeDraftOrder`, ticket → `in_repair`
+- **Send Quote** (£0, warranty / Care) → `createDraftOrder` + `completeDraftOrder`, ticket → `awaiting_item` (or `in_repair` if the item is already in)
 - Ticket shows what happened, dates and reason, plus **Resend invoice** (sent or expired;
   an expired quote reopens with a new draft order) and **Revise quote** (new draft from the
   last one; the old draft order is deleted)
 - After payment (`orders/paid` webhook): paying accepts — quotation `sent → paid` in one
-  step (cover claim counted), ticket → `in_repair`, metafield → `paid`, `payment` activity
+  step (cover claim counted), ticket → `awaiting_item` (or `in_repair` if the item is already in), metafield → `paid`, `payment` activity
   logged, `quote_paid` staff alert
 - Staff alerts: Flow triggers **Repair quote paid / declined / expired** (no customer
   reference, so guests too) for a "Send internal email" workflow; Klaviyo events optional

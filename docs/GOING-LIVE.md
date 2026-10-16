@@ -81,8 +81,9 @@ To demo sooner, place a recent order (within 60 days) for the customer account.
       because `logged_in_customer_id` can be blank there).
 
 ### Webhooks
-- [ ] Pay a test repair invoice → the ticket moves to *In repair*, staff get
-      the "quote paid" email.
+- [ ] Pay a test repair invoice → the ticket moves to *Awaiting item*, staff get
+      the "quote paid" email and the customer "Send your item to us" with the
+      postage slip PDF attached (see Postage slips below).
 - [ ] An ordinary sale → an Item (with cover, if a warranty policy matches)
       appears under **Items**.
 - [ ] Refund a line → the Item shows *Refunded* and its cover is cancelled.
@@ -112,11 +113,30 @@ To demo sooner, place a recent order (within 60 days) for the customer account.
 - [ ] Buy a product with Care → the item shows Care cover; refund the product →
       the Care line is refunded (or a credit code issued, per Settings).
 - [ ] A covered repair: the £0 quote completes itself (no invoice) and the
-      ticket goes straight to *In repair*.
+      ticket moves to *Awaiting item* (postage slip emailed), or straight to
+      *In repair* if the item was already marked received.
 - [ ] Optional: Flow (Settings → Notifications → Flow, **off by default**) and
       Klaviyo (private key with Events write access; "Send test").
 - [ ] Optional hardening: a Cart validation Function to stop a Care product
       being bought on its own.
+
+### Postage slips (customer posts the item; they pay the postage in V1)
+- [ ] Settings → Repairs → **Workshop address** (name, address, town,
+      postcode, country) and, optionally, **Posting instructions**. Without the
+      address no slips are sent: paid tickets say so and the ticket page links
+      to Settings.
+- [ ] Pay a test quote as a **guest** → "Send your item to us" arrives with
+      the PDF attached; print it (A4): the label's address, the repair number
+      and the packing slip's QR code (opens the ticket in the admin) are right.
+      The email's "Download postage slip" link opens the same PDF through
+      `/apps/repairs/tickets/:id/postage-slip` (works for 30 days).
+- [ ] As a **logged-in** customer, the Repair status block shows
+      "Download postage slip" while the repair awaits the item.
+- [ ] Ticket page → **Mark received** → status *Received*, the customer gets
+      "We've received your item"; **Resend postage email** and **Download
+      postage slip** work while awaiting the item.
+- [ ] The slip prints Latin text (accents, Polish, Czech, Vietnamese, …);
+      Greek, Cyrillic, CJK or emoji in a name or address print as "?".
 
 ### Workshop (parts)
 - [ ] Settings → Workshop on; import parts (CSV); link repair services to

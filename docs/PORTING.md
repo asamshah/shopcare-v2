@@ -37,13 +37,13 @@ or `deferred`.
 | `shopify.app.toml` | `shopify.app.toml` | done | scopes, app proxy (`apps`/`repairs` → `/proxy`), compliance webhooks. client_id is blank until linked |
 | `config/initializers/shopify_app.rb` (runtime webhooks) | `[[webhooks.subscriptions]]` in `shopify.app.toml` | done | app/uninstalled, orders/paid, refunds/create, 3 compliance topics; API version 2025-10 → 2026-10 |
 | `config/initializers/shopify_app.rb` (`after_authenticate_job`) | `hooks.afterAuth` in `app/shopify.server.ts` → `setUpShopAfterAuth` (app/services/shops/after-auth.server.ts) | done | creates/reactivates the Shop row, ensures the customer signing key (encrypted column + app-data metafield) and queues the order backfill once per shop (`queueOrderImport` → `import-orders` job) |
-| `config/routes.rb` | `app/routes/*` (flat routes) | done | proxy paths unchanged: `/proxy/intake`, `/proxy/status`, `/proxy/quotes/:token` (+ `/decline`), `/proxy/orders`, `/proxy/catalog_search`, `/proxy/order_lookup`, `/proxy/care_plans`, `/proxy/care_offers`, `/proxy/trade_in_options`, `/proxy/trade_ins`; admin under `/app/*`; webhooks under `/webhooks/*`; `/email/unsubscribe`, `/webhooks/email` (Resend) |
+| `config/routes.rb` | `app/routes/*` (flat routes) | done | proxy paths unchanged: `/proxy/intake`, `/proxy/status`, `/proxy/quotes/:token` (+ `/decline`), new in v2 `/proxy/tickets/:id/postage-slip`, `/proxy/orders`, `/proxy/catalog_search`, `/proxy/order_lookup`, `/proxy/care_plans`, `/proxy/care_offers`, `/proxy/trade_in_options`, `/proxy/trade_ins`; admin under `/app/*`; webhooks under `/webhooks/*`; `/email/unsubscribe`, `/webhooks/email` (Resend) |
 | `db/schema.rb` + `db/migrate/*` (26) | `prisma/schema.prisma` + `prisma/migrations/` | done | every domain table in one migration (`…_domain_schema`) on top of the template's `Session` migration; see [Schema notes](#schema-notes). Email settings go in `shops.settings` when the notifications are built |
 | `config/recurring.yml` `expire_quotes` (daily 3am) | `netlify/functions/daily-expire-quotes.mts` → job `expire-quotes` | done | 03:00 UTC; replaced the `daily-example.mts` template |
 | `config/storage.yml` (Disk / S3) | `app/lib/storage.server.ts` | done | Netlify Blobs; signed URLs served by `app/routes/files.$.tsx` |
 | `Shop` `encrypts` | `app/lib/encryption.server.ts` | done | key rotation via `APP_ENCRYPTION_PREVIOUS_KEYS`; `*_ciphertext` columns, read/written with `shopSecret` / `setShopSecret` in `app/models/shop.server.ts` |
 | `config/initializers/content_security_policy.rb` | `addDocumentResponseHeaders` (library) | done | the library sets frame-ancestors |
-| `test/storefront` CI job | `.github/workflows/ci.yml` | deferred | deferred: the Liquid+jsdom journeys are not ported (see Tests: storefront); the extension request/response contract is covered by test/integration/routes/extension-contract.test.ts in the main CI job |
+| `test/storefront` CI job | `.github/workflows/ci.yml` | done | the Liquid+jsdom journeys are the Vitest `storefront` project (test/storefront/), so `npm test` in the main CI job runs them; the request/response contract is test/integration/routes/extension-contract.test.ts |
 | `bin/brakeman`, `bin/rubocop` | `npm run lint`, `npm run typecheck` | done | |
 | Solid Queue / Solid Cache / Puma / Docker | Netlify Functions | done | `Dockerfile` kept from the template for self-hosting only |
 | `Rails.cache` (product facts, catalogue, repair products) | `cache_entries` table, `PostgresCache` (app/lib/postgres-cache.server.ts) | done | default `ShopifyCache` outside Vitest (in-memory under Vitest); TTL per caller; DB errors = cache miss |
@@ -205,6 +205,8 @@ checked before every send. Addresses are stored as SHA-256 digests only.
 |---|---|---|---|
 | Repair request received | customer (incl. guests) | intake submitted (`Repairs::IntakeSubmission`) | transactional, **new** |
 | Repair status changed: assessing / in repair / ready / returned | customer | ticket status change (`repair_status_changed`) | transactional |
+| Send your item to us (postage slip PDF attached + signed download link) | customer (incl. guests) | ticket enters `awaiting_item` (`item_requested`; once per ticket, staff can resend) | transactional, **new** (16-10-2026) |
+| We've received your item | customer (incl. guests) | staff **Mark received** (`item_received`) | transactional, **new** (16-10-2026) |
 | Care plan welcome | customer | Care activated (`care_activated`) | transactional |
 | Care credit code issued | customer | `care_credit_offer` (`Care::CreditIssuer`) | transactional |
 | Add Care to your purchase | customer | `care_offer` | **marketing**: see consent rule |
@@ -708,8 +710,8 @@ the model layer.
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
 | `test/storefront/package-lock.json` | (none) | done | dropped |
-| `test/storefront/package.json` | (none) | deferred | deferred with storefront.test.js (no jsdom/liquidjs devDeps until then) |
-| `test/storefront/storefront.test.js` | test/storefront/ | deferred | deferred: Liquid+jsdom journeys over extensions/repair-intake not ported (the extension is copied unchanged); its proxy mocks are replayed against the real routes in test/integration/routes/extension-contract.test.ts. Port as a Vitest jsdom project when the extension next changes |
+| `test/storefront/package.json` | package.json devDependencies | done | `jsdom` 24.1.3 and `liquidjs` 10.16.1, the versions Rails used |
+| `test/storefront/storefront.test.js` | test/storefront/storefront.test.js | done | ported 16-10-2026 when the Repair status block gained "Download postage slip": the same journeys, ES module imports, one `it()` each, Vitest project `storefront` (`npm run test:storefront`); its proxy mocks are also replayed against the real routes in test/integration/routes/extension-contract.test.ts |
 
 ### Tests: helper (1)
 
@@ -725,7 +727,7 @@ routes and services (Postgres, Admin GraphQL fakes):
 
 | Scenario | Path |
 |---|---|
-| (a) repair, start to finish | `/proxy/intake` → admin `addLineItem` → `sendQuote` → `orders/paid` (twice) → `in_repair` → `changeTicketStatus(completed)` (recipe parts out of stock) → `/proxy/status` |
+| (a) repair, start to finish | `/proxy/intake` → admin `addLineItem` → `sendQuote` → `orders/paid` (twice) → `awaiting_item` (one "Send your item to us" email; `/proxy/status` links the postage slip) → `markItemReceived` → `in_repair` → `changeTicketStatus(completed)` (recipe parts out of stock) → `/proxy/status` |
 | (b) Care plan covers a repair | `orders/paid` with a Care line → cover → `/proxy/intake` for that item → £0 quote → `sendQuote` completes it (no invoice) |
 | (c) decline on the review page | `/proxy/quotes/:token/decline` → quote declined, draft order deleted, staff `quote_declined` queued |
 | (d) Care refund, duplicate delivery | `refunds/create` delivered twice at once → cover cancelled once, one processed refund, no Shopify refund call (the merchant already refunded the line) |

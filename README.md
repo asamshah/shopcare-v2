@@ -32,7 +32,8 @@ app/
   models/            one module per Rails model: validations, enums, business rules (plain functions over Prisma rows)
   shopify/           Admin API (GraphQL) calls: draft orders, discounts, store credit, orders, products, shop
   lib/               infrastructure and pure helpers: encryption, signing, GIDs, customer token, storage,
-                     background dispatch, webhooks, http caching, row locks, Postgres cache, proxy throttling
+                     background dispatch, webhooks, http caching, row locks, Postgres cache, proxy throttling,
+                     pdf/ (the postage slip PDF: pdf-lib + qrcode, Noto Sans Latin embedded)
   services/          domain services (Rails app/services): notifications, items, care, warranty, repairs,
                      quotes (send/resend/revise/decision/cancel: the shared service contract),
                      payments, gdpr (customer export + redaction, shop redaction), parts, trade-ins,
@@ -49,6 +50,7 @@ extensions/          theme app extension + Flow triggers (copied unchanged from 
 parked/              Flow trigger not yet shipped (trade-in status)
 test/unit/           pure tests
 test/integration/    tests against a real Postgres (routes, services, webhooks; e2e/ = whole journeys)
+test/storefront/     the theme extension's Liquid + JS run in jsdom (customer journeys)
 test/support/        DB reset, factories, Shopify-signed request builders, fakes
 docs/                PORTING.md, BACKGROUND-WORK.md, and the Rails docs (ROADMAP, GOING-LIVE, …)
 ```
@@ -92,6 +94,7 @@ Requirements: Node 22.12+, Docker, the [Shopify CLI](https://shopify.dev/docs/ap
 npm test                    # unit + integration
 npm run test:unit           # no database needed (unit tests never touch Postgres)
 npm run test:integration    # needs the Postgres container
+npm run test:storefront     # the theme extension in jsdom (no database)
 npm run typecheck
 npm run lint
 ```
@@ -206,6 +209,29 @@ scopes now include `write_customers`; see
 - [`docs/PORTING.md`](docs/PORTING.md): Rails → TS checklist, Netlify cost notes, notifications design
 - [`docs/BACKGROUND-WORK.md`](docs/BACKGROUND-WORK.md): background and scheduled functions, webhook ack pattern
 - [`docs/ROADMAP.md`](docs/ROADMAP.md), [`docs/GOING-LIVE.md`](docs/GOING-LIVE.md), [`docs/MERCHANT-ADMIN-SPEC.md`](docs/MERCHANT-ADMIN-SPEC.md): product docs carried over from Rails
+
+## Postage slips
+
+When a quote is paid (or a £0 covered quote completes) the ticket moves to
+**Awaiting item** and the customer is emailed "Send your item to us" with a
+printable A4 PDF attached: a cut-out address label to the workshop, a packing
+slip (repair number, customer, item, the quote's lines, a QR code that opens the
+ticket in the admin) and the posting instructions. The customer pays the
+postage. Staff **Mark received** on the ticket (→ **Received**, "We've received
+your item" email), then carry on to *In repair*.
+
+- Settings → Repairs → **Workshop address** is required; without it nothing is
+  sent and the ticket says so (**Resend postage email** once it's set).
+- One PDF per ticket in file storage (`shops/<id>/tickets/<id>/postage-slip.pdf`),
+  redrawn when anything printed on it changes. Served to staff at
+  `/app/tickets/:id/postage_slip` and to customers at
+  `/apps/repairs/tickets/:id/postage-slip` (a signed link, 30 days in the email,
+  a day from the Repair status block, or the logged-in owner). GDPR redaction
+  and shop redaction delete it.
+- Fonts: Noto Sans cut down to Latin (Basic Latin, Latin-1, Latin Extended
+  A/B and Additional), see `app/lib/pdf/fonts/`. Other scripts (Greek,
+  Cyrillic, CJK, emoji) print as "?". The PDF is ~20 KB and deterministic.
+- Prepaid labels (Royal Mail Click & Drop, Shippo) are V1.5: see the roadmap.
 
 ## Gotchas
 

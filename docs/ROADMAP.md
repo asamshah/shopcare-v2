@@ -1,7 +1,7 @@
 # ShopCare — Product Roadmap
 
 > Personal project of Asam Shah (Partner org *Hype Park*). A footwear brand is the
-> first pilot customer, not the owner. Last updated **15-10-2026**.
+> first pilot customer, not the owner. Last updated **16-10-2026**.
 >
 > Related docs: [`MERCHANT-ADMIN-SPEC.md`](MERCHANT-ADMIN-SPEC.md) covers the Stage-1 repairs
 > admin, which is mostly built. [`GOING-LIVE.md`](GOING-LIVE.md) is the wiring checklist.
@@ -72,6 +72,15 @@ declines on the review page → `orders/paid` → status sync. See MERCHANT-ADMI
 - Custom line items replace the "£10/£20/… CUSTOM" placeholder-product workaround.
 - Customer-facing status portal (the incumbent's biggest gap): a first **Repair status**
   block lists a logged-in customer's repairs with "Quote ready – review" / "Pay now" links.
+- **Getting the item in (postage slips, built 16-10-2026):** once a quote is paid (or £0
+  covered) the ticket waits in **Awaiting item** and the customer is emailed a printable
+  A4 PDF: a cut-out address label to the workshop, a packing slip with a QR code to the
+  ticket, and the merchant's posting instructions. The customer pays their own postage.
+  Staff **Mark received** → **Received** → in repair.
+- **V1.5: prepaid return labels.** Buy the label for the customer (Royal Mail Click & Drop
+  first for UK merchants, Shippo for multi-carrier/international), charge it into the
+  quote or absorb it under Care, and put the carrier's label on the slip in place of the
+  address label. Not started.
 
 ### 3.2 Cover: warranty and Care plans (V1 warranty, V2 Care)
 **Warranty (V1):** merchant-set rules for the cover period, covered faults, outcome (free
@@ -288,4 +297,5 @@ share on Care. A partner price for brands referred by a repair workshop is also 
 | 16-10-2026 | **ShopCare sends its own emails** (Resend by default): repair received and status updates, Care welcome and credit codes to customers (guests included); staff alerts to one address. The "Add Care" offer is marketing, sent only with Shopify email marketing consent. Flow triggers and Klaviyo become optional extras. Supersedes the 15-10 "ShopCare sends no email itself" |
 | 16-10-2026 | **Pricing proposal** (§6): Starter ~$49 / Growth ~$149 / Pro ~$299 plus 5–10% of Care plan sales; no free plan, 14-day trial. To validate in brand calls; billing not built yet |
 | 16-10-2026 | Care plans available on all ShopCare plans (Starter included); Care repairs count towards the repair limit |
+| 16-10-2026 | **Postage slips (V1): the customer posts the item and pays the postage.** New ticket statuses `awaiting_item` (paid or £0 covered, waiting for the parcel) and `received` (staff **Mark received**); paid tickets for items already received go straight to `in_repair`. The customer gets "Send your item to us" with a printable PDF (cut-out label, packing slip with a QR code to the ticket, posting instructions; `pdf-lib`, Latin fonts embedded) and a signed 30-day download link, so guests can print it; the Repair status block links it too. Needs Settings → Repairs → Workshop address. Prepaid labels (Royal Mail Click & Drop / Shippo) are V1.5 (§3.1) |
 | 15-10-2026 | Parts are planned from the quote's services (re-planning keeps hand-added parts) and taken from stock when the ticket moves to **completed**; the ticket stores parts + labour cost and margin (labour rate in Settings) |

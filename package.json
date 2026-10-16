@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:storefront": "vitest run --project storefront",
     "test:watch": "vitest",
     "prisma": "prisma",
     "postinstall": "prisma generate",

@@ -1,8 +1,9 @@
 /**
- * Vitest: two projects.
+ * Vitest: three projects.
  *   unit         pure functions; no database or network; runs in parallel
  *   integration  real Postgres (TEST_DATABASE_URL), migrated once per run,
  *                truncated before every test, files run one at a time
+ *   storefront   the theme extension's Liquid + JS in jsdom (no database)
  *
  * Locally, Postgres is the `shopcare-v2-pg` Docker container (see README).
  * In CI it's a service container.
@@ -18,6 +19,13 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["test/unit/**/*.test.ts"],
+          env,
+        },
+      },
+      {
+        test: {
+          name: "storefront",
+          include: ["test/storefront/**/*.test.js"],
           env,
         },
       },

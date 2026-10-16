@@ -73,10 +73,11 @@ declines on the review page → `orders/paid` → status sync. See MERCHANT-ADMI
 - Customer-facing status portal (the incumbent's biggest gap): a first **Repair status**
   block lists a logged-in customer's repairs with "Quote ready – review" / "Pay now" links.
 - **Getting the item in (postage slips, built 16-10-2026):** once a quote is paid (or £0
-  covered) the ticket waits in **Awaiting item** and the customer is emailed a printable
-  A4 PDF: a cut-out address label to the workshop, a packing slip with a QR code to the
-  ticket, and the merchant's posting instructions. The customer pays their own postage.
-  Staff **Mark received** → **Received** → in repair.
+  covered) the ticket waits in **Awaiting item** and Shopify's order confirmation (with
+  ShopCare's snippet) links a printable A4 PDF: a cut-out address label to the workshop,
+  a packing slip with a QR code to the ticket, and the merchant's posting instructions.
+  The customer pays their own postage. Staff **Mark received** → **Received** → in
+  repair → **Mark returned** with tracking (Shopify's shipping confirmation).
 - **V1.5: prepaid return labels.** Buy the label for the customer (Royal Mail Click & Drop
   first for UK merchants, Shippo for multi-carrier/international), charge it into the
   quote or absorb it under Care, and put the carrier's label on the slip in place of the
@@ -106,8 +107,11 @@ theft, loss or accidental-damage cover; no cash payouts.
 1. A product-page block offers "Add Care / No thanks" (Theme App Extension).
 2. The Care product is added to the cart linked to the shoe, so it can't be bought alone and
    comes off if the shoe is removed.
-3. `orders/paid` creates the Item and its Care cover, and the confirmation is sent.
-4. Customers who skipped Care get an "add Care within N days" email after purchase.
+3. `orders/paid` creates the Item and its Care cover; Shopify's order confirmation (with
+   ShopCare's snippet) confirms what the plan covers.
+4. Customers who skipped Care are tagged `shopcare-care-offer-eligible` N days after
+   purchase, for the merchant's Shopify Email "add Care" campaign (or the optional Flow
+   trigger → Shopify Email).
 5. Refunding the item automatically cancels and refunds the Care plan.
 6. Claiming: the customer picks the Item, sees their cover and when it ends, and a
    £0 (plus any excess) ticket is created.
@@ -224,7 +228,7 @@ ticketing tool. Care plans earn the merchant money, so ShopCare earns with them.
 | Plan | Price | Includes |
 |---|---|---|
 | Starter | ~$49/mo | Repairs, quotes and warranty, up to ~50 repairs/mo |
-| Growth | ~$149/mo | Unlimited repairs, workshop inventory, ShopCare emails, custom sending domain |
+| Growth | ~$149/mo | Unlimited repairs, workshop inventory, Order confirmation / Care offer setup |
 | Pro | ~$299/mo | Several workshops, outbound webhook, priority support |
 | **Care** | **+5–10% of Care plan sales** | On any plan, billed as Shopify usage charges with a monthly cap |
 | Trade-in (V2+) | +$99–149/mo | Benchmark: Tern charges ~$299/mo for trade-in alone |
@@ -294,8 +298,9 @@ share on Care. A partner price for brands referred by a repair workshop is also 
 | 16-10-2026 | **Care = full repair cover**: a plan covers every repair for its term except the fixed exclusions (and the merchant's own). Per-service choice, fair-use limits and the "% off non-covered repairs" perk are gone; quotes under Care are free on every line, plus the excess once per repair. Terms read "All repairs to your <product> for <N> years, except: …". Supersedes the 15-10 per-line Care pricing |
 | 16-10-2026 | Pilot stock is shared with production, one workshop, and a spreadsheet is the source of truth: **parts CSV import / export** now (preview before applying; stock counts recorded as `stock_count` movements); Shopify inventory or Google Sheets sync later (§3.3) |
 | 16-10-2026 | **Rewrite from Rails to TypeScript on Netlify** (Shopify's React Router template, Prisma + Postgres on Neon, Netlify Functions / Scheduled / Background functions, Netlify Blobs). The Rails app is frozen at tag `rails-reference` as the spec |
-| 16-10-2026 | **ShopCare sends its own emails** (Resend by default): repair received and status updates, Care welcome and credit codes to customers (guests included); staff alerts to one address. The "Add Care" offer is marketing, sent only with Shopify email marketing consent. Flow triggers and Klaviyo become optional extras. Supersedes the 15-10 "ShopCare sends no email itself" |
+| 16-10-2026 | ~~**ShopCare sends its own emails**~~ (superseded below by "All emails sent by Shopify") (Resend by default): repair received and status updates, Care welcome and credit codes to customers (guests included); staff alerts to one address. The "Add Care" offer is marketing, sent only with Shopify email marketing consent. Flow triggers and Klaviyo become optional extras. Supersedes the 15-10 "ShopCare sends no email itself" |
 | 16-10-2026 | **Pricing proposal** (§6): Starter ~$49 / Growth ~$149 / Pro ~$299 plus 5–10% of Care plan sales; no free plan, 14-day trial. To validate in brand calls; billing not built yet |
 | 16-10-2026 | Care plans available on all ShopCare plans (Starter included); Care repairs count towards the repair limit |
 | 16-10-2026 | **Postage slips (V1): the customer posts the item and pays the postage.** New ticket statuses `awaiting_item` (paid or £0 covered, waiting for the parcel) and `received` (staff **Mark received**); paid tickets for items already received go straight to `in_repair`. The customer gets "Send your item to us" with a printable PDF (cut-out label, packing slip with a QR code to the ticket, posting instructions; `pdf-lib`, Latin fonts embedded) and a signed 30-day download link, so guests can print it; the Repair status block links it too. Needs Settings → Repairs → Workshop address. Prepaid labels (Royal Mail Click & Drop / Shippo) are V1.5 (§3.1) |
 | 15-10-2026 | Parts are planned from the quote's services (re-planning keeps hand-added parts) and taken from stock when the ticket moves to **completed**; the ticket stores parts + labour cost and margin (labour rate in Settings) |
+| 16-10-2026 | **All emails sent by Shopify; Resend removed.** The quote is the draft-order invoice; "send your item" (postage slip link, workshop address, instructions) and Care confirmations are a ShopCare section the merchant pastes into Shopify's Order confirmation, fed by draft-order attributes and Care line properties; the item going back is Shopify's Shipping confirmation (Mark returned fulfils the order with tracking). Staff rely on Shopify's staff order notifications and the admin's **Needs attention** list; Flow stays optional and **off by default** (triggers + recipes for internal emails; repair-submitted and data-request triggers added). The Add Care offer is a customer tag (`shopcare-care-offer-eligible`) for a Shopify Email campaign, or Flow → Shopify Email. Request received, status changes and credit codes aren't emailed: the storefront shows them. Supersedes the 16-10 "ShopCare sends its own emails" |

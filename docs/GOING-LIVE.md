@@ -8,26 +8,40 @@ with `shopify app config link` and is deployed with `shopify app deploy`; the
 extension uids already belong to it. Its dev store is chosen on the first
 `shopify app dev`; the earlier Rails wiring used **asamlabs.myshopify.com**.
 
-The deploy steps (Neon, Resend, Netlify, Shopify) are in the README's
+The deploy steps (Neon, Netlify, Shopify) are in the README's
 [Deploy](../README.md#deploy) section. This file is what to check once it's up.
 
 ---
 
-## Scope change: `write_customers` needs re-approval
+## Scope change: needs re-approval
 
-v2 asks for `write_customers` instead of `read_customers` (the rest of the
-scopes are unchanged). It's needed so that unsubscribing from ShopCare's "Add
-Care" marketing email also updates the customer's email marketing consent in
-Shopify (`customerEmailMarketingConsentUpdate`), so the store and ShopCare
-agree.
+v2 asks for more than the Rails app (`shopify.app.toml` `[access_scopes]`,
+mirrored in `SCOPES`):
 
-- `shopify app deploy` pushes the new scope list.
+- `write_customers` instead of `read_customers`: the customer repair-status
+  metafield and the `shopcare-care-offer-eligible` customer tag
+  (`tagsAdd` / `tagsRemove`).
+- **`read_merchant_managed_fulfillment_orders`,
+  `write_merchant_managed_fulfillment_orders`** (16-10-2026): ticket →
+  **Mark returned** reads the repair order's fulfillment orders and calls
+  `fulfillmentCreate` with tracking and `notifyCustomer: true`, so Shopify
+  sends its Shipping confirmation
+  ([fulfillmentCreate](https://shopify.dev/docs/api/admin-graphql/latest/mutations/fulfillmentCreate)
+  needs `write_assigned_fulfillment_orders`,
+  `write_merchant_managed_fulfillment_orders` or
+  `write_third_party_fulfillment_orders`; repair orders are at the merchant's
+  own location).
+
+What to do:
+
+- `shopify app deploy` pushes the new scope list; set the same `SCOPES` on
+  Netlify.
 - Each store that already has ShopCare must **re-approve**: open ShopCare in
   the store's admin; Shopify shows the permission prompt (the
-  `app/scopes_update` webhook records the change). Until it's approved, the
-  unsubscribe still works inside ShopCare (suppression list) but Shopify's
-  consent isn't updated.
-- New installs get it in the normal install prompt.
+  `app/scopes_update` webhook records the change). Until then **Mark
+  returned** fails with an access error (fulfil the order in Shopify by hand
+  meanwhile) and the customer tag isn't kept.
+- New installs get them in the normal install prompt.
 
 ## Still open: full purchase history needs `read_all_orders`
 
@@ -74,31 +88,65 @@ To demo sooner, place a recent order (within 60 days) for the customer account.
 
 ### Theme app extension (`extensions/repair-intake`)
 - [ ] Add the **Repair request** block (and **Repair status** on a page; put
-      that page's URL in the block settings *and* in Settings → Notifications →
-      Repair status page, so repair emails link to it).
+      that page's URL in the block settings *and* in Settings → Emails →
+      Repair status page, so the order confirmation links to it). Customers
+      follow their repairs there (no status emails): the step tracker, the
+      postage slip and their Care credit codes.
 - [ ] Logged-in customers on **new customer accounts**: confirm the repair
       form lists their orders (the blocks send a Liquid-signed customer token,
       because `logged_in_customer_id` can be blank there).
 
 ### Webhooks
-- [ ] Pay a test repair invoice → the ticket moves to *Awaiting item*, staff get
-      the "quote paid" email and the customer "Send your item to us" with the
-      postage slip PDF attached (see Postage slips below).
+- [ ] Pay a test repair invoice → the ticket moves to *Awaiting item*; the
+      customer's Shopify order confirmation has the ShopCare section (see
+      Emails below) and staff get Shopify's "New order" notification.
 - [ ] An ordinary sale → an Item (with cover, if a warranty policy matches)
       appears under **Items**.
 - [ ] Refund a line → the Item shows *Refunded* and its cover is cancelled.
 - [ ] Uninstall/reinstall on a dev store → the shop is marked uninstalled,
       then reactivated.
 
-### Email (Resend)
-- [ ] Sending domain verified; Settings → Notifications: "Notify staff at"
-      and "Reply-to address" set; submit a test repair → the customer's
-      "repair received" and the staff "new repair request" emails arrive.
-- [ ] Resend webhook delivers to `/webhooks/email` (send to a bouncing address
-      → it appears on the suppression list and is skipped next time).
-- [ ] The "Add Care" offer goes out `care_offer_delay_days` after purchase
-      (Settings → Notifications, default 7) to customers with email marketing
-      consent; its unsubscribe link works.
+### Emails (Shopify sends them)
+
+ShopCare sends no email. Check each one in a dev store:
+
+- [ ] **Order confirmation snippet**: Settings → Emails → **Copy snippet**
+      (or setup step 4), then Shopify → Settings → Notifications → Customer
+      notifications → **Order confirmation** → Edit code → paste (e.g. above
+      the order summary) → Save. Shopify's "Send test email" uses a sample
+      order without ShopCare's attributes, so the section stays hidden there:
+      test with a real repair order.
+- [ ] **Quote**: Send quote → Shopify's draft-order invoice arrives (guests
+      too), with the validity and the decline link.
+- [ ] **Paid repair** → the order confirmation shows "Your repair #…", the
+      workshop address, the posting instructions and **Download your postage
+      slip** (opens the PDF; the link works until the quote's validity + 30
+      days). With the item already marked received it says so instead.
+- [ ] **£0 covered repair** (completed with `draftOrderComplete`, marked as
+      paid) → the customer gets the order confirmation with the same section.
+      Shopify documents that marking a draft order as paid sends it
+      ([Accepting payment](https://help.shopify.com/en/manual/fulfillment/managing-orders/create-orders/get-paid));
+      confirm it on the dev store. If a store doesn't send it, resend the
+      confirmation from the order in Shopify; the Repair status block links
+      the slip either way.
+- [ ] **Care**: buy a product with Care (and, logged in, add Care to a past
+      purchase) → the order confirmation's Care section names the plan, the
+      product and the end date, with the statutory rights sentence.
+- [ ] **Mark returned** with a tracking number → Shopify's **Shipping
+      confirmation** arrives with the tracking link; the ticket is completed.
+      (Repair lines don't require shipping; confirm the shipping
+      confirmation is sent for them on the dev store.)
+- [ ] **Staff**: Shopify → Settings → Notifications → Staff notifications →
+      **New order** on, so paid repairs reach the workshop. Everything else is
+      under **Needs attention** on the Tickets home (new requests, declined /
+      expired quotes, items not posted after N days, received items not
+      started).
+- [ ] **Add Care offer**: N days after purchase (Settings → Emails, default
+      7) eligible customers carry the `shopcare-care-offer-eligible` tag;
+      create a Shopify Email campaign (or automation) for that segment. Buying
+      Care removes the tag at once; the window ending removes it the next day.
+- [ ] Optional: Flow (Settings → Emails, **off by default**; recipes below)
+      and Klaviyo (private key with Events write access; "Send test").
 
 ### Items + warranty
 - [ ] Create a warranty policy (admin → **Warranty**).
@@ -113,28 +161,30 @@ To demo sooner, place a recent order (within 60 days) for the customer account.
 - [ ] Buy a product with Care → the item shows Care cover; refund the product →
       the Care line is refunded (or a credit code issued, per Settings).
 - [ ] A covered repair: the £0 quote completes itself (no invoice) and the
-      ticket moves to *Awaiting item* (postage slip emailed), or straight to
-      *In repair* if the item was already marked received.
-- [ ] Optional: Flow (Settings → Notifications → Flow, **off by default**) and
-      Klaviyo (private key with Events write access; "Send test").
+      ticket moves to *Awaiting item* (Shopify's order confirmation carries
+      the postage slip link), or straight to *In repair* if the item was
+      already marked received.
+- [ ] A Care credit code (refund with Settings → Care → credit code) shows on
+      the item page for staff to share and on the customer's Repair status
+      page; it isn't emailed.
 - [ ] Optional hardening: a Cart validation Function to stop a Care product
       being bought on its own.
 
 ### Postage slips (customer posts the item; they pay the postage in V1)
 - [ ] Settings → Repairs → **Workshop address** (name, address, town,
       postcode, country) and, optionally, **Posting instructions**. Without the
-      address no slips are sent: paid tickets say so and the ticket page links
-      to Settings.
-- [ ] Pay a test quote as a **guest** → "Send your item to us" arrives with
-      the PDF attached; print it (A4): the label's address, the repair number
-      and the packing slip's QR code (opens the ticket in the admin) are right.
-      The email's "Download postage slip" link opens the same PDF through
-      `/apps/repairs/tickets/:id/postage-slip` (works for 30 days).
+      address the order confirmation has no slip link and the ticket page
+      links to Settings.
+- [ ] Pay a test quote as a **guest** → the order confirmation's "Download
+      your postage slip" opens the PDF through
+      `/apps/repairs/tickets/:id/postage-slip`; print it (A4): the label's
+      address, the repair number and the packing slip's QR code (opens the
+      ticket in the admin) are right.
 - [ ] As a **logged-in** customer, the Repair status block shows
       "Download postage slip" while the repair awaits the item.
-- [ ] Ticket page → **Mark received** → status *Received*, the customer gets
-      "We've received your item"; **Resend postage email** and **Download
-      postage slip** work while awaiting the item.
+- [ ] Ticket page → **Mark received** → status *Received* (the Repair status
+      block shows it; no email); **Download postage slip** works while
+      awaiting the item.
 - [ ] The slip prints Latin text (accents, Polish, Czech, Vietnamese, …);
       Greek, Cyrillic, CJK or emoji in a name or address print as "?".
 
@@ -164,23 +214,33 @@ needs **new customer accounts** (otherwise use discount codes).
 - [ ] Apply for protected customer data access (PII + orders) for the public app.
 - [ ] Netlify Blobs holds photos and exports (nothing to configure on Netlify).
 
-## Flow recipe: staff alerts for repair quotes (optional)
+## Flow recipes (optional)
 
-ShopCare emails staff itself ("Notify staff at"). If the merchant prefers Flow
-(Settings → Notifications → Flow on), for each of **Repair quote paid**,
-**Repair quote declined** and **Repair quote expired**:
+ShopCare works without Flow. For merchants who want emails ShopCare doesn't
+send: Settings → Emails → **Send ShopCare events to Shopify Flow** on, then in
+Shopify admin → **Flow** → **Create workflow** → **Select a trigger** →
+search "ShopCare" (or the trigger name). Flow's variable picker lists each
+trigger's fields.
 
-1. Shopify admin → **Flow** → **Create workflow** → **Select a trigger** → search
-   "Repair quote" → pick the trigger.
-2. **Add action** → **Send internal email**. To: the workshop inbox. Subject, e.g.
-   `Repair #{{ticketNumber}} quote paid — {{productTitle}}` (Flow's variable picker
-   lists the fields: Ticket number, Product title, Customer name, Customer email,
-   Quote total, plus Order name / Reason / Valid until).
-3. Body, e.g. `{{customerName}} ({{customerEmail}}) paid {{quoteTotal}} — order
-   {{orderName}}.` Declined: `Reason: {{reason}}`. Expired: `Was valid until
-   {{validUntil}}`.
-4. **Turn on workflow**, and switch ShopCare's own staff emails off for the same
-   events to avoid duplicates. Check Settings → Recent notifications shows *Sent*.
+| Trigger | Fields | Suggested action |
+|---|---|---|
+| **Repair request submitted** (staff alert) | Ticket number, Product title, Customer name, Customer email, Description, Admin URL | **Send internal email** to the workshop: `New repair #{{ticketNumber}}: {{productTitle}}`, body `{{customerName}} ({{customerEmail}}): {{description}} {{adminUrl}}` |
+| **Repair quote paid** (staff alert) | Ticket number, Product title, Customer name, Customer email, Quote total, Order name | Send internal email (Shopify's "New order" staff notification also covers it) |
+| **Repair quote declined** (staff alert) | … + Reason | Send internal email: `Quote declined for #{{ticketNumber}}: {{reason}}` |
+| **Repair quote expired** (staff alert) | … + Valid until | Send internal email: revise and resend from the ticket |
+| **Customer data request** (staff alert) | Request ID, Customer, Records found, Download URL, Admin URL | Send internal email to whoever answers privacy requests |
+| **Add Care offer** (customer) | Product title, Care plan, Care price, Offer ends, Add Care URL | Shopify Messaging → **Send marketing email** (sends only to customers subscribed to email marketing) with a template linking `{{addCareURL}}` |
+| **Repair status changed** (customer) | Ticket number, Status, Product title | Optional customer email of your own, e.g. a condition on Status = "Ready" |
+| **Care activated** / **Care credit issued** (customer) | Care plan, Product title, Cover ends / Credit code, Credit amount, Credit expires | Optional customer email (the order confirmation already covers Care; credit codes show on the Repair status page) |
+
+Staff alerts carry no customer reference, so they fire for guests too.
+"Send internal email" can't take the recipient from a variable
+([Send internal email](https://help.shopify.com/en/manual/shopify-flow/reference/actions/send-email)).
+Check Settings → Recent notifications shows *Sent* for the Flow deliveries.
+Flow template extensions (`flow_template`) need workflows exported from the
+Flow app as `.flow` files
+([Create a Flow template](https://shopify.dev/docs/apps/build/flow/templates/create-a-template)):
+export these recipes from the dev store to ship them as templates.
 
 ## Known dev-environment gotchas
 

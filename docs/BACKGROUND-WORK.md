@@ -6,7 +6,7 @@ request runs in Netlify Functions:
 | Need | Use | Limit | Example |
 |---|---|---|---|
 | Answer a request or webhook | the React Router SSR function | 60 s (keep webhooks < 5 s) | `app/routes/webhooks.orders.paid.tsx` |
-| Long or slow work (Admin API pages, emails, imports) | **Background Function** `netlify/functions/jobs-background.mts` | 15 min, retried twice on error (after 1 min and 2 min) | `enqueue("example", …)` |
+| Long or slow work (Admin API pages, Flow / Klaviyo deliveries, imports) | **Background Function** `netlify/functions/jobs-background.mts` | 15 min, retried twice on error (after 1 min and 2 min) | `enqueue("example", …)` |
 | Daily or periodic work | **Scheduled Function** | 30 s, published deploy only, cron in UTC | in use: `daily-prune.mts`, `daily-care-offers.mts`, `daily-expire-quotes.mts`, `hourly-notification-sweep.mts` (copy any of them) |
 
 Docs: [background functions](https://docs.netlify.com/build/functions/background-functions/),

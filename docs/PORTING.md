@@ -37,8 +37,8 @@ or `deferred`.
 | `shopify.app.toml` | `shopify.app.toml` | done | scopes, app proxy (`apps`/`repairs` → `/proxy`), compliance webhooks. client_id is blank until linked |
 | `config/initializers/shopify_app.rb` (runtime webhooks) | `[[webhooks.subscriptions]]` in `shopify.app.toml` | done | app/uninstalled, orders/paid, refunds/create, 3 compliance topics; API version 2025-10 → 2026-10 |
 | `config/initializers/shopify_app.rb` (`after_authenticate_job`) | `hooks.afterAuth` in `app/shopify.server.ts` → `setUpShopAfterAuth` (app/services/shops/after-auth.server.ts) | done | creates/reactivates the Shop row, ensures the customer signing key (encrypted column + app-data metafield) and queues the order backfill once per shop (`queueOrderImport` → `import-orders` job) |
-| `config/routes.rb` | `app/routes/*` (flat routes) | done | proxy paths unchanged: `/proxy/intake`, `/proxy/status`, `/proxy/quotes/:token` (+ `/decline`), new in v2 `/proxy/tickets/:id/postage-slip`, `/proxy/orders`, `/proxy/catalog_search`, `/proxy/order_lookup`, `/proxy/care_plans`, `/proxy/care_offers`, `/proxy/trade_in_options`, `/proxy/trade_ins`; admin under `/app/*`; webhooks under `/webhooks/*`; `/email/unsubscribe`, `/webhooks/email` (Resend) |
-| `db/schema.rb` + `db/migrate/*` (26) | `prisma/schema.prisma` + `prisma/migrations/` | done | every domain table in one migration (`…_domain_schema`) on top of the template's `Session` migration; see [Schema notes](#schema-notes). Email settings go in `shops.settings` when the notifications are built |
+| `config/routes.rb` | `app/routes/*` (flat routes) | done | proxy paths unchanged: `/proxy/intake`, `/proxy/status`, `/proxy/quotes/:token` (+ `/decline`), new in v2 `/proxy/tickets/:id/postage-slip`, `/proxy/orders`, `/proxy/catalog_search`, `/proxy/order_lookup`, `/proxy/care_plans`, `/proxy/care_offers`, `/proxy/trade_in_options`, `/proxy/trade_ins`; admin under `/app/*`; webhooks under `/webhooks/*` |
+| `db/schema.rb` + `db/migrate/*` (26) | `prisma/schema.prisma` + `prisma/migrations/` | done | every domain table in one migration (`…_domain_schema`) on top of the template's `Session` migration; see [Schema notes](#schema-notes) |
 | `config/recurring.yml` `expire_quotes` (daily 3am) | `netlify/functions/daily-expire-quotes.mts` → job `expire-quotes` | done | 03:00 UTC; replaced the `daily-example.mts` template |
 | `config/storage.yml` (Disk / S3) | `app/lib/storage.server.ts` | done | Netlify Blobs; signed URLs served by `app/routes/files.$.tsx` |
 | `Shop` `encrypts` | `app/lib/encryption.server.ts` | done | key rotation via `APP_ENCRYPTION_PREVIOUS_KEYS`; `*_ciphertext` columns, read/written with `shopSecret` / `setShopSecret` in `app/models/shop.server.ts` |
@@ -50,8 +50,8 @@ or `deferred`.
 | `ProxyThrottling` (Rails.cache counters) | `proxy_throttles` table, `postgresThrottleStore` | done | default outside Vitest |
 | — (v2) daily housekeeping | `netlify/functions/daily-prune.mts` → job `daily-prune` | done | 03:15 UTC: throttle rows older than a day, expired cache entries |
 | — (v2) stuck-notification sweep | `netlify/functions/hourly-notification-sweep.mts` → job `notification-sweep` | done | hourly at :20: re-enqueues `pending` deliveries 15 min–48 h old |
-| — (v2) email unsubscribe + suppression | `app/routes/email.unsubscribe.tsx`, `app/routes/webhooks.email.tsx` (Resend), `email_suppressions` | done | env `RESEND_WEBHOOK_SECRET`; scope `write_customers` (replaces `read_customers`) for the Shopify consent update |
-| — (v2) "Add Care" offer timing | `netlify/functions/daily-care-offers.mts` → job `care-offers` | done | 10:00 UTC: emits `care_offer` `care_offer_delay_days` (default 7) after purchase; consent checked at send |
+| — (v2) email unsubscribe + suppression | removed 16-10-2026 (Shopify sends every email; see [Notifications](#notifications)) | removed | migration `…_shopify_sends_emails` drops `email_suppressions` |
+| — (v2) "Add Care" offer timing | `netlify/functions/daily-care-offers.mts` → job `care-offers` | done | 10:00 UTC: emits `care_offer` (Flow / Klaviyo) `care_offer_delay_days` (default 7) after purchase and syncs the `shopcare-care-offer-eligible` customer tag |
 
 ## Service contract
 
@@ -172,153 +172,84 @@ export const action = proxyRoute({ throttle: { ... } }, async (ctx) => {
   `flash`, `statusOf`, `dataOf`) runs loaders/actions against Postgres; the
   Shopify client is a `FakeGraphql`, contract services are `vi.mock`ed (their own tests, and test/integration/e2e/scenarios.test.ts, run them for real).
 
-## Notifications (v2 design)
+## Notifications
 
-**Decision:** ShopCare sends its own customer and staff emails from code.
-Shopify Flow triggers and Klaviyo events become **optional integrations**, not
-the delivery mechanism. The quote/invoice email is still Shopify's own
-draft-order invoice (`Repairs::QuoteSender` → `draftOrderInvoiceSend`),
-unchanged.
+**Decision (16-10-2026): every customer and staff email is sent by Shopify.**
+ShopCare has no email provider (Resend was removed with its templates,
+consent check, unsubscribe link, suppression list and webhook). ShopCare
+works fully with Shopify Flow **off** (the default); Flow and Klaviyo are
+optional integrations for merchants who want extra emails of their own.
 
-Foundation in place: `app/services/email.server.ts`, which defines
-`sendEmail({ shopId, to, subject, html, text, replyTo, fromName, tags,
-idempotencyKey })` with a Resend adapter (default when `RESEND_API_KEY` is set)
-and a `log` adapter (dev/test; captures messages). Provider types stay inside
-the adapter, so a Postmark adapter can be added later.
+### Email → Shopify
 
-Built (`app/services/notifications.server.ts` + `app/services/notifications/`):
-templates, the dispatcher, the `notification` job, consent check, Flow and
-Klaviyo clients. Wired (integration-1): `PrismaNotificationStore`
-(`notification_deliveries`; claim = insert, existing row on the unique
-conflict), `loadNotificationSettings` (Shop row, see Settings below), consent
-and Admin clients via the offline session; these are the default deps outside
-tests. Also built: the signed unsubscribe link
-(`/email/unsubscribe`, app/services/notifications/unsubscribe*.server.ts),
-which enables the marketing "Add Care" email, and the `email_suppressions`
-list fed by unsubscribes and the Resend webhook (`/webhooks/email`,
-`email.bounced` permanent → global, `email.complained` → the sending shop),
-checked before every send. Addresses are stored as SHA-256 digests only.
-
-### Emails
-
-| Email | To | Trigger (Rails source) | Kind |
+| Email | How Shopify sends it | Data it relies on | Docs |
 |---|---|---|---|
-| Repair request received | customer (incl. guests) | intake submitted (`Repairs::IntakeSubmission`) | transactional, **new** |
-| Repair status changed: assessing / in repair / ready / returned | customer | ticket status change (`repair_status_changed`) | transactional |
-| Send your item to us (postage slip PDF attached + signed download link) | customer (incl. guests) | ticket enters `awaiting_item` (`item_requested`; once per ticket, staff can resend) | transactional, **new** (16-10-2026) |
-| We've received your item | customer (incl. guests) | staff **Mark received** (`item_received`) | transactional, **new** (16-10-2026) |
-| Care plan welcome | customer | Care activated (`care_activated`) | transactional |
-| Care credit code issued | customer | `care_credit_offer` (`Care::CreditIssuer`) | transactional |
-| Add Care to your purchase | customer | `care_offer` | **marketing**: see consent rule |
-| New repair request | staff | intake submitted | staff alert, **new** |
-| Quote paid | staff | `quote_paid` (orders/paid) | staff alert |
-| Quote declined (with reason) | staff | `quote_declined` | staff alert |
-| Quote expired | staff | `quote_expired` (daily expiry job) | staff alert |
+| Repair quote | Draft-order invoice: Send quote creates the draft order and calls `draftOrderInvoiceSend` (subject/message from Settings → Emails → Quote email) | the draft order | [draftOrderInvoiceSend](https://shopify.dev/docs/api/admin-graphql/latest/mutations/draftOrderInvoiceSend) |
+| "Send your item to us" + postage slip | **Order confirmation**, via the ShopCare snippet the merchant pastes into Settings → Notifications → Order confirmation (`app/services/emails/order-confirmation.liquid`; Settings → Emails has a copy button and previews, setup step 4 offers it). Shown only on repair orders: workshop address, posting instructions, "Download your postage slip", repair number, status page link | the repair draft order's **custom attributes**, which become the order's `attributes`: `repair_ticket_id`, `shopcare_postage_slip_url` (signed, valid for the quote's validity + 30 days), `shopcare_workshop_address`, `shopcare_posting_instructions`, `shopcare_status_url`, `shopcare_item_received`. Written at Send quote (and refreshed on resend/revise), so they're there when the order is created | [notification variables](https://help.shopify.com/en/manual/fulfillment/setup/notifications/email-variables) (`attributes`, `line_items`, `line.properties`, `created_at`, `metafields`); [DraftOrderInput.customAttributes](https://shopify.dev/docs/api/admin-graphql/latest/input-objects/DraftOrderInput) |
+| Care plan confirmation | The same snippet's Care section on any order with a Care line: "Your ShopCare 2 year plan covers all repairs to your <product> until <date>, except the exclusions in the plan's terms" + the statutory rights sentence | Care cart line properties set by the theme: `_shopcare_for` / `_shopcare_item`, `_shopcare_term_months`, `_shopcare_cover_ends` (Add Care later), `Product` | same |
+| Repaired item posted back | **Shipping confirmation**: ticket → **Mark returned** fulfils the repair order (`fulfillmentCreate`, tracking, `notifyCustomer: true`) and completes the ticket | the paid quote's `shopify_order_id` | [fulfillmentCreate](https://shopify.dev/docs/api/admin-graphql/latest/mutations/fulfillmentCreate), [FulfillmentInput.notifyCustomer](https://shopify.dev/docs/api/admin-graphql/latest/input-objects/FulfillmentInput) |
+| Staff: repair paid | Shopify's own staff **New order** notification ("Sent when a customer places an order"; repair orders are ordinary orders, tagged `shopcare-repair`). The page doesn't say whether a draft order completed by an app (£0) triggers it: the Needs attention list and the optional **Repair quote paid** Flow trigger cover that | — | [Staff notifications](https://help.shopify.com/en/manual/fulfillment/setup/notifications/staff-notifications) |
+| Staff: new request, quote declined / expired, item late, item received | The admin's **Needs attention** list on the Tickets home (no email). Optional: Flow triggers **Repair request submitted**, **Repair quote paid / declined / expired** → Flow's "Send internal email" | — | [Send internal email](https://help.shopify.com/en/manual/shopify-flow/reference/actions/send-email) |
+| "Add Care to your purchase" (marketing) | Not sent by ShopCare. Without Flow: a Shopify Email campaign to customers tagged **`shopcare-care-offer-eligible`** (kept in step daily). With Flow: the **Add Care offer** trigger → Shopify Messaging's "Send marketing email" (sends only to customers subscribed to email marketing) | tag sync: `tagsAdd` / `tagsRemove` on Customer (`write_customers`, already granted) | [Flow app connectors](https://help.shopify.com/en/manual/shopify-flow/reference/connectors/apps), [tagsAdd](https://shopify.dev/docs/api/admin-graphql/latest/mutations/tagsAdd) |
+| Request received, item received, in repair / status changes, Care credit code | **Not emailed.** The repair form's confirmation shows the tracker (Requested → Quoted → Awaiting item → Received → In repair → Returned); the Repair status block shows each repair's step, the postage slip download and the customer's Care credit codes; the admin item page shows staff the code to share. Flow triggers (repair status changed, Care activated, Care credit issued) stay for merchants who want to email these themselves | — | — |
+| GDPR data request (to the merchant) | **Not emailed.** The export is listed in Settings → Customer data requests (signed download) with a banner on the Tickets home; optional Flow trigger **Customer data request** → "Send internal email" | — | — |
 
-Staff alerts go to the **"Notify staff at"** address in Settings.
+### £0 (covered) repairs and the order confirmation
 
-### Marketing consent
+A £0 quote is completed straight away with `draftOrderComplete` (marked as
+paid, no invoice). Shopify's Help Center says marking a draft order as paid
+sends the customer an order confirmation ("The received amount isn't captured
+again by your payment provider, and the customer receives an order
+confirmation email",
+[Accepting payment for draft orders](https://help.shopify.com/en/manual/fulfillment/managing-orders/create-orders/get-paid)),
+and the API reference says the customer "can be notified" when a draft order
+is completed
+([draftOrderComplete](https://shopify.dev/docs/api/admin-graphql/latest/mutations/draftOrderComplete));
+the mutation has no notify flag. So a £0 repair's customer gets the Order
+confirmation with the ShopCare section, as long as the draft order has their
+email (it always does: `email` is the ticket's). **Verify on the dev store**
+(GOING-LIVE): if a store's £0 completions don't send it, staff can resend it
+from the order page in Shopify, and the Repair status block links the slip
+either way.
 
-"Add Care to your purchase" is marketing. At send time, read the customer's
-consent via the Admin API: `customer(id) { defaultEmailAddress {
-marketingState } }` (confirmed against 2026-10; `CustomerEmailAddressMarketingState`:
-INVALID, NOT_SUBSCRIBED, PENDING, SUBSCRIBED, UNSUBSCRIBED). Send only when the state
-is `SUBSCRIBED`; otherwise mark the delivery `skipped` with the reason and log
-it. Guests have no consent record, so they are always skipped.
+### Optional integrations
 
-### Branding
-
-- From: `"<Store name> via ShopCare" <notifications@EMAIL_FROM_DOMAIN>`
-  (`fromAddress()` already sanitises the display name).
-- Reply-To: the merchant's support email (setting; defaults to the shop's
-  contact email from `shop { contactEmail }`).
-- Template header uses the store name and logo (from `shop.brand` or an upload
-  in Settings).
-- Later (optional): a verified custom sending domain per merchant (DNS records
-  shown in Settings, verified through the provider's domains API).
-
-### Settings (per shop)
-
-- On/off toggle **per email**, so merchants already using Klaviyo or Flow for
-  the same message can switch ShopCare's off and avoid duplicates.
-- Editable subject and intro text per email, with defaults; the body
-  structure stays fixed.
-- Staff alert address ("Notify staff at").
-- Support / Reply-To address.
-- Stored in `shops.settings.notifications` (snake_case): `flow` (Shopify
-  Flow, **off by default**: no shops are migrated), `staff_email`,
-  `support_email` (falls back to `settings.contact_email`), `logo_url`,
-  `accent_color`, `address_lines`, `store_url`, `locale`,
-  `emails.<kind>.{enabled,subject,intro}`, `care_offer_delay_days`
-  (default 7; Settings → Notifications "Send the Add Care offer after") and
-  `status_url` (Settings → Notifications "Repair status page": the
-  storefront page with the Repair status block; repair emails link to it as
-  `statusUrl`). Staff emails link to the ticket in the admin (`adminUrl`,
-  `https://admin.shopify.com/store/<store>/apps/<SHOPIFY_APP_HANDLE>/app/tickets/<id>`,
-  the `app.tickets.$id` route). The Klaviyo key is the encrypted
-  `klaviyoApiKey` secret.
-
-### "Add Care to your purchase" timing
-
-Rails emitted `care_offer` straight after the order and left the delay to the
-merchant's Flow/Klaviyo. In v2 ShopCare sends it: the daily scheduled function
-`netlify/functions/daily-care-offers.mts` (10:00 UTC) enqueues the
-`care-offers` job, which, for every installed shop, finds order Items bought
-`care_offer_delay_days` ago (with a 2-day catch-up for a missed run), works
-out the plans still on offer (Rails `Care::Notices#offer`: one offer per
-order) and emits `care_offer`. Consent is **not** checked when emitting: it's
-checked when the delivery is sent (marketing consent rule above), so a
-customer who unsubscribes in between gets nothing. The idempotency key
-`care_offer:order_<id>` stops repeats. Flow/Klaviyo, when enabled, get the
-event at the same moment. Code: app/services/care/care-offers.server.ts,
-app/jobs/care-offers.server.ts.
+Flow triggers (`extensions/shopcare-flow-*`, Settings → Emails → "Send
+ShopCare events to Shopify Flow", **off by default**): care-activated,
+care-credit, care-offer, quote-paid, quote-declined, quote-expired,
+repair-status, and (v2) **repair-submitted** and **data-request** (staff
+alerts, no customer reference); plus `parked/shopcare-flow-trade-in-status`.
+Klaviyo metrics: the same events except the data request (its export link
+must not land on the customer's profile). Ready-made recipes are in
+[GOING-LIVE](GOING-LIVE.md#flow-recipes-optional). Flow **template
+extensions** (`type = "flow_template"`) need a workflow exported from the
+Flow app as a `.flow` file, which "shouldn't be edited directly"
+([Create a Flow template](https://shopify.dev/docs/apps/build/flow/templates/create-a-template));
+none is shipped until those are exported from a dev store.
 
 ### Reliability
 
-- Never send inline from a request or webhook: create a
-  `notification_deliveries` row, then `enqueue("notification", { deliveryId })`.
-  The background function sends it, and on a retryable `EmailDeliveryError`
-  (429/5xx/network) it throws so Netlify retries; it also records `attempts`
-  and `last_error`.
-- Idempotency key per event, `<event>:<record id>` (e.g.
-  `repair_status_changed:ticket_42:ready`), with a **unique index** on
-  `(shop_id, channel, idempotency_key)` in `notification_deliveries`. A
-  duplicate webhook or retry finds the existing row and stops. The provider's
-  `Idempotency-Key` is `<shop>:<channel>:<key>`, because provider keys are
-  account-wide. Channels: `email` (customer), `staff_email`, `flow`,
-  `klaviyo`; one event makes at most one row per channel.
-- "Add Care to your purchase" is **off by default** (merchant opts in).
-- `notification_deliveries` keeps its Rails role as the log merchants see
-  (pending / sent / skipped / failed), with new channel `email`, plus
-  `provider_message_id`, `idempotency_key`, `attempts`, `last_error`.
-- Provider webhook (Resend: `email.bounced`, `email.complained`) → route
-  `webhooks.email.tsx` (Svix signature, `RESEND_WEBHOOK_SECRET`) notes the
-  delivery and adds the address to the suppression list (bounces global,
-  complaints per sending shop) checked before every send.
+- Never sends inline from a request or webhook: `notify` / `emitNotification`
+  claim a `notification_deliveries` row per channel (`flow`, `klaviyo`)
+  under the idempotency key `<event>:<record id>` (unique on
+  `(shop_id, channel, idempotency_key)`), then enqueue the `notification`
+  job. Retryable failures (throttling, 5xx, network) are rethrown so the
+  background function retries; `attempts` and `error` are recorded.
 - An hourly sweep (`netlify/functions/hourly-notification-sweep.mts`)
-  re-enqueues deliveries stuck in `pending` (claimed but never enqueued).
+  re-enqueues deliveries stuck in `pending`.
+- `notification_deliveries` is the log merchants see in Settings → Recent
+  notifications.
 
-### Optional integrations (unchanged set from `rails-reference`)
+### "Add Care to your purchase" timing
 
-Flow triggers (`extensions/shopcare-flow-*`): care-activated, care-credit,
-care-offer, quote-declined, quote-expired, quote-paid, repair-status; plus
-`parked/shopcare-flow-trade-in-status`. Klaviyo metrics: the same events
-(`Notifications::Dispatcher::EVENTS`). They are still emitted when the merchant
-enables Flow or adds a Klaviyo key, independently of ShopCare's own emails.
-
-### Compliance
-
-- Transactional emails (request received, status, Care welcome, credit code,
-  staff alerts) need no marketing consent.
-- Every customer email footer includes the store's name and postal address
-  (`shop.billingAddress` or a Settings value).
-- An unsubscribe link (plus `List-Unsubscribe` / one-click headers) only on
-  the marketing email; unsubscribing records a per-shop opt-out and the
-  `marketing-unsubscribe` job calls Shopify's
-  `customerEmailMarketingConsentUpdate` (UNSUBSCRIBED; confirmed against the
-  2026-10 schema, needs `write_customers`, now in the scopes) so the store
-  and ShopCare agree. Consent is read from
-  `customer.defaultEmailAddress.marketingState` (2026-10).
+The daily `care-offers` job (`netlify/functions/daily-care-offers.mts`,
+10:00 UTC) emits `care_offer` `care_offer_delay_days` (default 7) after
+purchase, one per order (`care_offer:order_<id>`, 2-day catch-up), and keeps
+the `shopcare-care-offer-eligible` customer tag on exactly the customers who
+can still add Care (bought ≥ delay days ago, plan still on offer, no Care;
+guests can't be tagged). Buying Care removes the tag at once (orders/paid).
+Code: app/services/care/care-offers.server.ts,
+app/services/care/care-offer-tags.server.ts, app/jobs/care-offers.server.ts.
 
 ## Schema notes
 
@@ -327,12 +258,12 @@ enables Flow or adds a Klaviyo key, independently of ShopCare's own emails.
   from the reviewed `prisma/pending/proxy_throttles.sql`, now removed) and
   `cache_entries` (shared TTL cache: `key` PK, `value` jsonb, `expires_at`).
   Both are pruned by the daily `daily-prune` job.
-- `notification_deliveries.channel` also takes `staff_email` (v2).
-- `…_w2backend_email_suppressions` adds
-  `email_suppressions`: `shop_id` (nullable, cascade), `scope_key`
-  ("global" or "shop:<id>"), `email_digest` (SHA-256 of the lower-cased
-  address), `kind` (marketing | all), `reason` (unsubscribe | bounce |
-  complaint), `detail`; unique (scope_key, email_digest, kind).
+- `…_w2backend_email_suppressions` added `email_suppressions` (ShopCare's
+  own email suppression list); `…_shopify_sends_emails` (16-10-2026) drops
+  it again with `notification_deliveries.provider_message_id` and
+  `repair_tickets.postage_emails_sent`, and deletes old `email` /
+  `staff_email` deliveries: Shopify sends every email. Channels are `flow`
+  and `klaviyo`.
 
 Phase 2 (branch `schema`) ported every domain table from `db/schema.rb` and
 the model layer.
@@ -370,10 +301,9 @@ the model layer.
   `content_type`, `byte_size`; `registrations` gets `proof_*` columns;
   `trade_ins.photos` is a jsonb list of `{ key, filename, contentType,
   byteSize }`. No `active_storage_*` tables.
-- **notification_deliveries** gains v2 columns now: `idempotency_key`,
-  `provider_message_id`, `attempts`, a unique index on
-  `(shop_id, channel, idempotency_key)`, and the `email` channel. Rails'
-  `error` column keeps the last error.
+- **notification_deliveries** gains v2 columns: `idempotency_key`,
+  `attempts` and a unique index on `(shop_id, channel, idempotency_key)`.
+  Rails' `error` column keeps the last error.
 - **Model layer:** `app/models/<name>.server.ts`, plain functions over Prisma
   rows. `create*`/`update*` normalise, validate (`Errors` /
   `ValidationError` in `validation.server.ts`, Rails messages) and save;
@@ -400,7 +330,7 @@ the model layer.
 | `app/models/concerns/product_grouped.rb` | app/models/product-grouped.server.ts | done | |
 | `app/models/cover.rb` | prisma/schema.prisma `Cover` + app/models/cover.server.ts | done | `record_claim!` uses withRowLock |
 | `app/models/item.rb` | prisma/schema.prisma `Item` + app/models/item.server.ts | done | cover helpers take the item with its covers loaded (`findItemWithCovers`) |
-| `app/models/notification_delivery.rb` | prisma/schema.prisma `NotificationDelivery` + app/models/notification-delivery.server.ts | done | keeps its role as the per-event delivery log + idempotency record; adds channel "email" (see Notifications); `NotificationStore` interface + in-memory store in app/services/notifications/store.server.ts; Prisma implementation `PrismaNotificationStore` |
+| `app/models/notification_delivery.rb` | prisma/schema.prisma `NotificationDelivery` + app/models/notification-delivery.server.ts | done | keeps its role as the per-event delivery log + idempotency record (channels `flow`, `klaviyo`); `NotificationStore` interface + in-memory store in app/services/notifications/store.server.ts; Prisma implementation `PrismaNotificationStore` |
 | `app/models/part.rb` | prisma/schema.prisma `Part` + app/models/part.server.ts | done | default variant created in the same transaction (was `after_save`) |
 | `app/models/part_import.rb` | prisma/schema.prisma `PartImport` + app/models/part-import.server.ts | done | `importer` moves to app/services/parts/csv-import |
 | `app/models/part_variant.rb` | prisma/schema.prisma `PartVariant` + app/models/part-variant.server.ts | done | `move_stock!` uses withRowLock |
@@ -440,7 +370,7 @@ the model layer.
 | `app/services/items/refund_processor.rb` | app/services/items/refund-processor.server.ts | done | `processRefund`; processed_refunds claim via `INSERT … ON CONFLICT DO NOTHING` in the same transaction; line ids from GIDs when present |
 | `app/services/items/registration_submission.rb` | app/services/items/registration-submission.server.ts | deferred | deferred: no caller in the Rails app (no storefront registration route at `rails-reference`); port with the storefront registration flow |
 | `app/services/notifications/delivery_error.rb` | app/services/notifications/delivery-error.server.ts | done | adds `retryable` |
-| `app/services/notifications/dispatcher.rb` | app/services/notifications.server.ts (`emitNotification`, `deliverNotification`) + notifications/events.server.ts (EVENTS) | done | v2: email + staff_email channels, per-email toggles, consent at send time; templates in notifications/templates.server.ts. Production deps (notifications/production-deps.server.ts) are the default outside tests: `PrismaNotificationStore`, `loadNotificationSettings` (Shop row), Shopify consent + clients |
+| `app/services/notifications/dispatcher.rb` | app/services/notifications.server.ts (`emitNotification`, `deliverNotification`) + notifications/events.server.ts (EVENTS) | done | v2: Flow + Klaviyo only (Shopify sends every email; see Notifications). Production deps (notifications/production-deps.server.ts) are the default outside tests: `PrismaNotificationStore`, `loadNotificationSettings` (Shop row), the Admin client |
 | `app/services/notifications/flow_client.rb` | app/shopify/flow.server.ts (`triggerFlow`, `flowPayload`) + app/services/notifications/flow-client.server.ts (`FlowClient`: one attempt, errors → `DeliveryError`) | done | optional integration, unchanged trigger set; **off by default**. `customer_id` is the only place an id becomes a JSON number (Flow requires it); ids past 2^53 are sent as digits |
 | `app/services/notifications/klaviyo_client.rb` | app/services/notifications/klaviyo-client.server.ts | done | optional integration, unchanged event set; only 429/5xx/network retried |
 | `app/services/parts/consumer.rb` | app/services/parts/consumer.server.ts | done | `consumeTicketParts` (run by changeTicketStatus on completion; plans first if the ticket has no parts); each part re-checked under its row lock, so a second completion takes nothing twice |
@@ -464,7 +394,7 @@ the model layer.
 | `app/services/repairs/quote_canceller.rb` | app/services/quotes/cancel.server.ts | done | contract `cancelOpenQuotesForTicket({ shopId, ticketId, actor })` |
 | `app/services/repairs/quote_decision.rb` | app/services/quotes/decision.server.ts | done | contract `declineQuote` / `expireQuote` |
 | `app/services/repairs/quote_draft_order.rb` | app/services/repairs/quote-draft-order.server.ts | done | attributes + `ensureQuoteDraftOrder` (`id!`) + `deleteQuoteDraftOrder`; repair variants carry `priceOverride` |
-| `app/services/repairs/quote_notifications.rb` | app/services/quotes/notifications.server.ts | done | `notifyQuotePaid/Declined/Expired` (+ admin ticket link for the staff email) |
+| `app/services/repairs/quote_notifications.rb` | app/services/quotes/notifications.server.ts | done | `notifyQuotePaid/Declined/Expired` (Flow staff-alert triggers, with the admin ticket link) |
 | `app/services/repairs/quote_sender.rb` | app/services/quotes/send.server.ts, resend.server.ts | done | contract `sendQuote`, `resendInvoice`; row lock held for the send in a 90 s transaction; `reviseQuote` (QuotationsController#revise) in quotes/revise.server.ts |
 | `app/services/repairs/webhook_delivery.rb` | app/services/repairs/webhook-delivery.server.ts | done | SSRF guard: strict outside development/test, every resolved address public (wider ranges than Rails), connection pinned, no redirects. Headers: `User-Agent: ShopCare-Webhook/1.0`, `X-ShopCare-Event`, `X-ShopCare-Hmac-Sha256` |
 | `app/services/shopify/admin_api.rb` | app/shopify/graphql.server.ts, client.server.ts, draft-orders.server.ts, customers.server.ts, shop.server.ts | done | `adminGraphql` (typed data, THROTTLED/429 retry with backoff, `ShopifyGraphqlError`/`ShopifyUserError`), `adminClientForShop` (offline session). REST draft orders → `draftOrderCreate/Update/InvoiceSend/Complete/Delete`; REST customer metafields → `customer.metafield` + `metafieldsSet`; `shop_name` → `fetchShopInfo` |
@@ -513,7 +443,7 @@ the model layer.
 | `app/controllers/registrations_controller.rb` | app/routes/app.items.$id.tsx (intents verify/reject) | done | reviewed from the item page, by the item's registration |
 | `app/controllers/repair_services_controller.rb` | app/routes/app.repair_services._index.tsx, app.repair_services.$id.tsx | done |  |
 | `app/controllers/service_components_controller.rb` | app/routes/app.repair_services.$id.tsx (intents add_component/remove_component) | done |  |
-| `app/controllers/settings_controller.rb` | app/routes/app.settings.tsx + app/services/admin/settings.server.ts | done | v2: per-email toggles/subject/intro, staff + reply-to addresses; webhook secret is the encrypted column |
+| `app/controllers/settings_controller.rb` | app/routes/app.settings.tsx + app/services/admin/settings.server.ts | done | v2: Emails section (Order confirmation snippet, quote email, Flow switch), Customer data requests; webhook secret is the encrypted column |
 | `app/controllers/setup_controller.rb` | app/routes/app.setup.tsx + app/services/admin/setup.server.ts | done |  |
 | `app/controllers/ticket_parts_controller.rb` | app/routes/app.tickets.$id.tsx (intents plan_parts/add_part/update_part/remove_part) | done |  |
 | `app/controllers/tickets_controller.rb` | app/routes/app.tickets._index.tsx, app.tickets.$id.tsx + app/services/admin/tickets.server.ts | done | status changes call `changeTicketStatus` (shared contract) |
@@ -528,7 +458,7 @@ the model layer.
 | `app/jobs/after_authenticate_job.rb` | app/services/shops/after-auth.server.ts | done | `setUpShopAfterAuth`: shop row, signing key, then `queueOrderImport` once (settings.items_import) |
 | `app/jobs/app_uninstalled_job.rb` | app/routes/webhooks.app.uninstalled.tsx → `markShopUninstalled` | done | v2: sets `uninstalledAt` + deletes sessions; data erased by shop/redact (Rails destroyed the shop at once) |
 | `app/jobs/application_job.rb` | app/jobs/registry.server.ts | done | → app/jobs/registry.server.ts (done: pattern) |
-| `app/jobs/customers_data_request_job.rb` | app/jobs/webhook.server.ts CUSTOMERS_DATA_REQUEST → app/services/gdpr/customer-export.server.ts | done | v2: real JSON export in file storage, signed 14-day link emailed to the merchant (staff → support → contact → Shopify owner email), deleted after 30 days by daily-prune (Rails only logged counts) |
+| `app/jobs/customers_data_request_job.rb` | app/jobs/webhook.server.ts CUSTOMERS_DATA_REQUEST → app/services/gdpr/customer-export.server.ts | done | v2: real JSON export in file storage, listed in Settings → Customer data requests (signed download) with a home banner and the optional "Customer data request" Flow trigger; deleted after 30 days by daily-prune (Rails only logged counts) |
 | `app/jobs/customers_redact_job.rb` | app/jobs/webhook.server.ts CUSTOMERS_REDACT → `redactCustomer` | done |  |
 | `app/jobs/expire_quotes_job.rb` | app/jobs/expire-quotes.server.ts | done | `expireOverdueQuotes` → `expireQuote` per quote; scheduled by netlify/functions/daily-expire-quotes.mts |
 | `app/jobs/import_orders_job.rb` | app/jobs/import-orders.server.ts | done | 20 pages per run, cursor saved in settings.items_import and re-enqueued (`fetchPaidOrdersPage`) |
@@ -637,7 +567,7 @@ the model layer.
 | `test/services/items/recorder_test.rb` | test/integration/services/items/recorder.test.ts | done | adds concurrent recording and the unit cap |
 | `test/services/items/refund_processor_test.rb` | test/integration/services/items/refund-processor.test.ts | done | adds concurrent duplicate delivery and GID line ids |
 | `test/services/items/registration_submission_test.rb` | test/integration/services/items/registration-submission.test.ts | deferred | deferred with RegistrationSubmission |
-| `test/services/notifications/notifications_test.rb` | test/unit/notifications/{notifications,integrations,templates}.test.ts + test/integration/wiring/notification-store.test.ts | done | unit: in-memory store; integration: Prisma store (claim/conflict/race), Shop-row settings, emit → deliver round trip |
+| `test/services/notifications/notifications_test.rb` | test/unit/notifications/{notifications,integrations}.test.ts + test/integration/wiring/notification-store.test.ts | done | unit: in-memory store; integration: Prisma store (claim/conflict/race), Shop-row settings, emit → deliver round trip |
 | `test/services/parts/csv_import_test.rb` | test/integration/services/parts/csv-import.test.ts | done |  |
 | `test/services/parts/item_properties_test.rb` | test/integration/services/parts/item-properties.test.ts | done | Shopify half also in test/unit/shopify/products.test.ts |
 | `test/services/parts/planning_test.rb` | test/integration/services/parts/planning.test.ts + test/integration/services/repairs/ticket-status.test.ts | done | Matcher + Planner in planning.test.ts; Consumer + TicketCosts through changeTicketStatus (completion) |
@@ -727,7 +657,7 @@ routes and services (Postgres, Admin GraphQL fakes):
 
 | Scenario | Path |
 |---|---|
-| (a) repair, start to finish | `/proxy/intake` → admin `addLineItem` → `sendQuote` → `orders/paid` (twice) → `awaiting_item` (one "Send your item to us" email; `/proxy/status` links the postage slip) → `markItemReceived` → `in_repair` → `changeTicketStatus(completed)` (recipe parts out of stock) → `/proxy/status` |
+| (a) repair, start to finish | `/proxy/intake` → admin `addLineItem` → `sendQuote` → `orders/paid` (twice) → `awaiting_item` (the draft order carried the postage slip link for the order confirmation; `/proxy/status` links the slip) → `markItemReceived` → `in_repair` → `returnRepairedItem` (fulfilment with tracking, completed, recipe parts out of stock) → `/proxy/status` |
 | (b) Care plan covers a repair | `orders/paid` with a Care line → cover → `/proxy/intake` for that item → £0 quote → `sendQuote` completes it (no invoice) |
 | (c) decline on the review page | `/proxy/quotes/:token/decline` → quote declined, draft order deleted, staff `quote_declined` queued |
 | (d) Care refund, duplicate delivery | `refunds/create` delivered twice at once → cover cancelled once, one processed refund, no Shopify refund call (the merchant already refunded the line) |

@@ -84,16 +84,17 @@ TicketActivity           (replaces Odoo chatter)
 ## 4. Status pipeline (state machine)
 
 ```
-new ──▶ assessing ──▶ quoted ──paid / £0──▶ awaiting_item ──Mark received──▶ received ──▶ in_repair ──▶ ready ──▶ completed
-  │          ▲          │    (postage slip emailed)                                           ▲
+new ──▶ assessing ──▶ quoted ──paid / £0──▶ awaiting_item ──Mark received──▶ received ──▶ in_repair ──▶ ready ──Mark returned──▶ completed
+  │          ▲          │    (slip link in Shopify's order confirmation)                       ▲
   │          │          └──paid / £0, item already received (Mark received earlier)────────────┘
   │          └── quote_declined (revise → assessing)
   └────────────────▶ cancelled / rejected
 ```
 
 Staff can still move a ticket to any status from the Status menu; choosing
-`awaiting_item` emails the postage slip (once per ticket) and choosing `received`
-records the arrival like **Mark received**.
+`received` records the arrival like **Mark received**. ShopCare emails no one:
+customers follow the steps on the Repair status page, and staff work from
+**Needs attention** on the Tickets home.
 
 Quotation (the Shopify invoice is the quote; paying it is accepting it):
 
@@ -114,20 +115,23 @@ link stops working; sending again creates a new one.
 - `assessing` — staff reviewing photos/description
 - `quoted` — quote sent: Shopify emailed its invoice; paying it accepts the quote
 - `quote_declined` — the customer declined the quote (optional reason) or it expired unpaid; staff revise and re-send
-- `awaiting_item` — quote paid (via `orders/paid`) or £0 covered; the customer has been
-  emailed a **postage slip** (PDF: cut-out address label to the workshop, packing slip
-  with a QR code to the ticket, posting instructions) and is posting the item. Customers
-  pay their own postage in V1
-- `received` — staff clicked **Mark received**: the parcel arrived; the customer is
-  emailed "We've received your item". Staff then move it to `in_repair`
+- `awaiting_item` — quote paid (via `orders/paid`) or £0 covered; Shopify's order
+  confirmation (with ShopCare's snippet) linked a **postage slip** (PDF: cut-out address
+  label to the workshop, packing slip with a QR code to the ticket, posting
+  instructions) and the customer is posting the item. Customers pay their own postage
+  in V1
+- `received` — staff clicked **Mark received**: the parcel arrived (shown on the Repair
+  status page). Staff then move it to `in_repair`
 - `in_repair` — repair underway (straight after payment when the item was already received)
 - `ready` — repaired, ready to ship / collect
-- `completed` — shipped/collected, closed
+- `completed` — shipped/collected, closed. **Mark returned** (tracking number) fulfils
+  the repair order so Shopify sends its shipping confirmation, then completes the ticket
 - `cancelled` / `rejected` — terminal
 
 **Warranty path:** a £0 quote skips payment — auto-completes the draft order (existing
-`completeDraftOrder`) and moves the ticket `quoted → awaiting_item` (postage slip
-emailed) or, when the item was already received, `quoted → in_repair`. No invoice email.
+`completeDraftOrder`) and moves the ticket `quoted → awaiting_item` (Shopify's order
+confirmation carries the slip link) or, when the item was already received,
+`quoted → in_repair`. No invoice email.
 
 **Customer-facing metafield mapping** (existing sync): `quoted/in_repair → "requested"`,
 payment → `"paid"`. Extend to surface full status in the customer portal later.
@@ -173,8 +177,12 @@ payment → `"paid"`. Extend to surface full status in the customer portal later
 - After payment (`orders/paid` webhook): paying accepts — quotation `sent → paid` in one
   step (cover claim counted), ticket → `awaiting_item` (or `in_repair` if the item is already in), metafield → `paid`, `payment` activity
   logged, `quote_paid` staff alert
-- Staff alerts: Flow triggers **Repair quote paid / declined / expired** (no customer
-  reference, so guests too) for a "Send internal email" workflow; Klaviyo events optional
+- Staff: **Needs attention** on the Tickets home (new requests to quote, declined and
+  expired quotes, paid repairs whose item hasn't arrived after N days, received items not
+  started) and Shopify's own "New order" staff notification for paid repairs. Optional:
+  Flow triggers **Repair request submitted** and **Repair quote paid / declined /
+  expired** (no customer reference, so guests too) for a "Send internal email"
+  workflow (Flow is off by default); Klaviyo events optional
 
 ### 5.3a Repair services
 - Own nav item, right after Tickets. Lists the repair services (Shopify products in the

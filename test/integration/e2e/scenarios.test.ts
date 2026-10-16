@@ -214,6 +214,10 @@ describe("end-to-end scenarios", () => {
     const item = await prisma.item.findFirstOrThrow({ where: { shopId: shop.id }, include: { covers: true } });
     expect(item.covers.map((c) => [c.kind, c.status, c.carePlanId])).toEqual([["care", "active", plan.id]]);
     expect(await events("care_activated")).not.toEqual([]);
+    // Bought Care: out of the "Add Care" offer segment (customer tag) at once.
+    expect(api.calls.filter(([kind]) => kind === "untag").map(([, v]) => v)).toEqual([
+      { id: `gid://shopify/Customer/${CUSTOMER}`, tags: ["shopcare-care-offer-eligible"] },
+    ]);
 
     const ticketId = await submitRepair({ description: "Heel worn down", customer_email: "sarah@example.com", item_id: String(item.id) });
     expect(await ticketOf(ticketId)).toMatchObject({ itemId: item.id, coverId: item.covers[0].id });

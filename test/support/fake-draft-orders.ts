@@ -44,6 +44,7 @@ export class FakeDraftOrders {
       },
       "metafield(namespace": { customer: { id: "gid://shopify/Customer/77", metafield: null } },
       "metafieldsSet(": { metafieldsSet: { metafields: [], userErrors: [] } },
+      "tagsRemove(": { tagsRemove: { node: { id: "gid://shopify/Customer/77" }, userErrors: [] } },
       // "Mark returned" (fulfillments.server.ts): order 5001 has one open fulfillment order.
       "fulfillmentOrders(": {
         order: {
@@ -76,6 +77,7 @@ export class FakeDraftOrders {
         ["draftOrderDelete(", "delete"],
         ["metafieldsSet(", "metafield"],
         ["fulfillmentCreate(", "fulfil"],
+        ["tagsRemove(", "untag"],
       ].find(([fragment]) => query.includes(fragment))?.[1];
       return kind ? [[kind, variables] as DraftCall] : [];
     });

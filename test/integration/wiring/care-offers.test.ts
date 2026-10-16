@@ -1,7 +1,8 @@
 /**
  * The daily "Add Care" offer: due N days after purchase (care_offer_delay_days,
  * default 7), one per order, emitted through the Prisma notification store.
- * Consent is checked later, when the delivery is sent.
+ * ShopCare never emails it: the optional Flow trigger, and the customer tag
+ * merchants can target from Shopify Email.
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Shop } from "@prisma/client";
@@ -10,6 +11,9 @@ import { emitCareOffers } from "../../../app/jobs/care-offers.server";
 import { careOfferWindow, dueCareOffers } from "../../../app/services/care/care-offers.server";
 import { PrismaNotificationStore } from "../../../app/services/notifications/prisma-store.server";
 import { createCarePlanFor, createItemFor, createShop } from "../../support/factories";
+import { FakeGraphql } from "../../support/fake-graphql";
+import { careOfferEligibleCustomers } from "../../../app/services/care/care-offer-tags.server";
+import { careCoverFor, createCover } from "../../../app/models/cover.server";
 
 const now = new Date("2026-10-16T10:00:00Z");
 const daysBefore = (n: number) => new Date(now.getTime() - n * 86_400_000);
@@ -104,8 +108,13 @@ describe("emitCareOffers (the care-offers job)", () => {
 
     const enqueue = vi.fn(async () => {});
     const deps = { store: new PrismaNotificationStore(prisma), enqueue };
-    expect(await emitCareOffers({ now, deps, currency })).toEqual({ emitted: 1, failed: [] });
-    await emitCareOffers({ now, deps, currency });
+    expect(await emitCareOffers({ now, deps, currency, tagClient: false })).toEqual({
+      emitted: 1,
+      tagged: 0,
+      untagged: 0,
+      failed: [],
+    });
+    await emitCareOffers({ now, deps, currency, tagClient: false });
 
     const rows = await prisma.notificationDelivery.findMany();
     expect(rows).toHaveLength(1);
@@ -124,7 +133,7 @@ describe("emitCareOffers (the care-offers job)", () => {
     const plan = await createCarePlanFor(shop, { offerWindowDays: 30 });
     await orderItem(shop, plan.id);
     const deps = { store: new PrismaNotificationStore(prisma), enqueue: vi.fn(async () => {}) };
-    await emitCareOffers({ now, deps, currency });
+    await emitCareOffers({ now, deps, currency, tagClient: false });
     expect(await prisma.notificationDelivery.count()).toBe(0);
   });
 
@@ -139,8 +148,63 @@ describe("emitCareOffers (the care-offers job)", () => {
       currency: async () => {
         throw new Error("Shopify down");
       },
+      tagClient: false,
     });
     error.mockRestore();
-    expect(result).toEqual({ emitted: 0, failed: [shop.shopifyDomain] });
+    expect(result).toEqual({ emitted: 0, tagged: 0, untagged: 0, failed: [shop.shopifyDomain] });
+  });
+});
+
+describe("the shopcare-care-offer-eligible customer tag (no Flow needed)", () => {
+  const tagApi = (alreadyTagged: string[]) =>
+    new FakeGraphql({
+      "customers(": (vars: Record<string, unknown>) => {
+        expect(vars.query).toBe("tag:'shopcare-care-offer-eligible'");
+        return {
+          customers: {
+            nodes: alreadyTagged.map((id) => ({ id: `gid://shopify/Customer/${id}` })),
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        };
+      },
+      "tagsAdd(": { tagsAdd: { node: { id: "x" }, userErrors: [] } },
+      "tagsRemove(": { tagsRemove: { node: { id: "x" }, userErrors: [] } },
+    });
+  const calls = (api: FakeGraphql, fragment: string) =>
+    api.calls.filter((c) => c.query.includes(fragment)).map((c) => [c.variables.id, c.variables.tags]);
+
+  it("tags customers still able to add Care and untags the rest, with Flow off", async () => {
+    const shop = await createShop({ settings: { care: { add_later_url: "https://acme.example/pages/care" } } });
+    const plan = await createCarePlanFor(shop, { offerWindowDays: 30 });
+    await orderItem(shop, plan.id, { shopifyCustomerId: "77" }); // 7 days ago: eligible
+    await orderItem(shop, plan.id, { orderId: "5002", orderLineId: "2", shopifyCustomerId: "78", purchasedAt: daysBefore(3) }); // too soon
+    await orderItem(shop, plan.id, { orderId: "5003", orderLineId: "3", shopifyCustomerId: "79", purchasedAt: daysBefore(31) }); // window over
+    await orderItem(shop, plan.id, { orderId: "5004", orderLineId: "4", shopifyCustomerId: null, customerEmail: "g@x.y" }); // guest
+    const api = tagApi(["79", "80"]);
+    const deps = { store: new PrismaNotificationStore(prisma), enqueue: vi.fn(async () => {}) };
+
+    const result = await emitCareOffers({ now, deps, currency, tagClient: async () => api });
+    expect(result).toMatchObject({ emitted: 2, tagged: 1, untagged: 2, failed: [] }); // 2 offers due (77 and the guest)
+    expect(calls(api, "tagsAdd(")).toEqual([["gid://shopify/Customer/77", ["shopcare-care-offer-eligible"]]]);
+    expect(calls(api, "tagsRemove(")).toEqual([
+      ["gid://shopify/Customer/79", ["shopcare-care-offer-eligible"]],
+      ["gid://shopify/Customer/80", ["shopcare-care-offer-eligible"]],
+    ]);
+    expect(await prisma.notificationDelivery.count()).toBe(0); // Flow off: no trigger
+  });
+
+  it("buying Care ends eligibility; a shop without Care plans is left alone", async () => {
+    const shop = await createShop();
+    const plan = await createCarePlanFor(shop, { offerWindowDays: 30 });
+    const item = await orderItem(shop, plan.id, { shopifyCustomerId: "77" });
+    expect([...(await careOfferEligibleCustomers(shop, { now }))]).toEqual(["77"]);
+    await createCover(careCoverFor(item, plan, { now }));
+    expect([...(await careOfferEligibleCustomers(shop, { now }))]).toEqual([]);
+
+    const noCare = await createShop();
+    const api = tagApi([]);
+    await emitCareOffers({ now, deps: { store: new PrismaNotificationStore(prisma), enqueue: vi.fn(async () => {}) }, currency, tagClient: async () => api });
+    expect(api.calls.filter((c) => c.variables.query)).toHaveLength(1); // only the shop with a plan
+    expect(noCare).toBeTruthy();
   });
 });

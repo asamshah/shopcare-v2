@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import type { FileStorage } from "../lib/storage.server";
 import { adminAppUrl, tradeInEnabled } from "../models/shop.server";
 import { notify } from "../services/notifications/notify.server";
+import { removeCareOfferTag } from "../services/care/care-offer-tags.server";
 import { notifyCareActivated } from "../services/care/notices.server";
 import { customerRefFromWebhook } from "../services/gdpr/customer-match.server";
 import { exportCustomerData } from "../services/gdpr/customer-export.server";
@@ -37,7 +38,8 @@ import type { JobPayload } from "./registry.server";
  *
  *   ORDERS_PAID             repair quote paid → processRepairPayment; any
  *                           other order → Items + warranty/Care cover,
- *                           care_activated, trade-in linking (when enabled)
+ *                           care_activated (and the Add Care offer tag
+ *                           removed), trade-in linking (when enabled)
  *   REFUNDS_CREATE          processRefund (once per refund id) + Care refunds
  *   CUSTOMERS_DATA_REQUEST  exportCustomerData (JSON export, shown in the admin)
  *   CUSTOMERS_REDACT        redactCustomer
@@ -97,6 +99,9 @@ const ordersPaid: TopicHandler = async (shop, payload, ctx) => {
       db: ctx.db,
       deps: ctx.notifyDeps,
     });
+    // Bought Care: no longer in the "Add Care" offer segment.
+    if (recorder.careResult.covers.length > 0 && order.customerId)
+      await removeCareOfferTag(await ctx.client(), [order.customerId]);
     if (tradeInEnabled(shop))
       await linkTradeInsToOrder(shop, order, {
         db: ctx.db,

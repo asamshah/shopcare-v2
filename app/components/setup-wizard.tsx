@@ -1,6 +1,7 @@
 import { Form, useSubmit } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { checkedIf } from "./attrs";
+import { OrderConfirmationSnippet } from "./order-confirmation-snippet";
 import { ProductGroupSelect, type GroupOption } from "./product-group-select";
 
 export interface WizardData {
@@ -15,15 +16,18 @@ export interface WizardData {
   presetMonths: number;
   /** One line, or null until Settings → Repairs has a complete workshop address. */
   workshopAddress: string | null;
+  /** The Order confirmation snippet, on step 4. */
+  snippet: string | null;
 }
 
 const STEPS: [number, string][] = [
   [1, "Product groups"],
   [2, "Repair services"],
   [3, "Warranty & Care"],
+  [4, "Order confirmation (optional)"],
 ];
 
-/** First-run setup on the admin home: three steps, each skippable (Rails setup/_wizard). */
+/** First-run setup on the admin home: four steps, each skippable (Rails setup/_wizard, plus v2's step 4). */
 export function SetupWizard({ wizard }: { wizard: WizardData }) {
   const shopify = useAppBridge();
   const submit = useSubmit();
@@ -40,7 +44,7 @@ export function SetupWizard({ wizard }: { wizard: WizardData }) {
   }
 
   return (
-    <s-section heading={`Set up ShopCare · Step ${step} of 3`}>
+    <s-section heading={`Set up ShopCare · Step ${step} of ${STEPS.length}`}>
       <s-stack direction="block" gap="base">
         <s-stack direction="inline" gap="small-200">
           {STEPS.map(([number, label]) => (
@@ -151,7 +155,7 @@ export function SetupWizard({ wizard }: { wizard: WizardData }) {
               </s-paragraph>
             )}
             <Form method="post" action="/app/setup">
-              <input type="hidden" name="intent" value="complete" />
+              <input type="hidden" name="intent" value="parts" />
               <s-stack direction="block" gap="small-200">
                 <input type="hidden" name="parts_enabled" value="0" />
                 <s-checkbox
@@ -163,7 +167,7 @@ export function SetupWizard({ wizard }: { wizard: WizardData }) {
                 ></s-checkbox>
                 <s-stack direction="inline">
                   <s-button variant="primary" type="submit">
-                    Finish setup
+                    Next
                   </s-button>
                 </s-stack>
               </s-stack>
@@ -171,7 +175,26 @@ export function SetupWizard({ wizard }: { wizard: WizardData }) {
           </>
         ) : null}
 
-        {step !== 3 ? (
+        {step === 4 ? (
+          <>
+            <s-paragraph>
+              Shopify sends all your emails, not ShopCare. Add ShopCare&apos;s section to Shopify&apos;s Order
+              confirmation so repair customers get their postage slip and posting instructions, and Care buyers see
+              what their plan covers. You can do this later in Settings → Emails.
+            </s-paragraph>
+            {wizard.snippet ? <OrderConfirmationSnippet snippet={wizard.snippet} /> : null}
+            <Form method="post" action="/app/setup">
+              <input type="hidden" name="intent" value="complete" />
+              <s-stack direction="inline">
+                <s-button variant="primary" type="submit">
+                  Finish setup
+                </s-button>
+              </s-stack>
+            </Form>
+          </>
+        ) : null}
+
+        {step !== 4 ? (
           <Form method="post" action="/app/setup">
             <input type="hidden" name="intent" value="complete" />
             <input type="hidden" name="skipped" value="1" />

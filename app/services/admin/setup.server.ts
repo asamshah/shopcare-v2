@@ -1,8 +1,9 @@
 /**
  * First-run setup, shown on the admin home (tickets) until the merchant
  * finishes or skips it: (1) product groups, (2) repair services, (3) warranty
- * and Care (and, optionally, workshop inventory). Port of SetupController and
- * setup/_wizard.
+ * and Care (and, optionally, workshop inventory), (4) optional: add the
+ * ShopCare section to Shopify's Order confirmation email. Port of
+ * SetupController and setup/_wizard (step 4 is v2).
  */
 import type { Prisma, Shop } from "@prisma/client";
 import prisma from "../../db.server";
@@ -22,10 +23,12 @@ import { createWarrantyPolicy } from "../../models/warranty-policy.server";
 import type { AdminGraphqlClient } from "../../shopify/graphql.server";
 import { errorSummary } from "../../shopify/graphql.server";
 import { importRepairServices, type RepairCatalog, shopifyRepairCatalog } from "../repairs/service-import.server";
+import { ORDER_CONFIRMATION_SNIPPET } from "../emails/order-confirmation.server";
 import { orNotFound } from "./context.server";
 import type { Flash } from "./flash.server";
 
 export const WARRANTY_PRESET_MONTHS = 12;
+export const SETUP_STEPS = 4;
 
 export async function groupOptions(shopId: number) {
   const groups = await prisma.productGroup.findMany({ where: { shopId }, orderBy: [{ name: "asc" }, { id: "asc" }] });
@@ -35,7 +38,7 @@ export async function groupOptions(shopId: number) {
 export async function wizardData(shop: Shop, rawStep: string | null) {
   if (!needsSetup(shop)) return null;
   const parsed = parseInt(rawStep ?? "1", 10);
-  const step = Math.min(Math.max(Number.isNaN(parsed) ? 1 : parsed, 1), 3);
+  const step = Math.min(Math.max(Number.isNaN(parsed) ? 1 : parsed, 1), SETUP_STEPS);
   const [groups, servicesCount, policies, plansCount] = await Promise.all([
     groupOptions(shop.id),
     prisma.repairService.count({ where: { shopId: shop.id, active: true } }),
@@ -52,6 +55,8 @@ export async function wizardData(shop: Shop, rawStep: string | null) {
     plansLabel: plansCount ? pluralize(plansCount, "Care plan") : null,
     partsEnabled: partsEnabled(shop),
     presetMonths: WARRANTY_PRESET_MONTHS,
+    /** Step 4: the Order confirmation snippet (only sent with that step). */
+    snippet: step === SETUP_STEPS ? ORDER_CONFIRMATION_SNIPPET : null,
     workshopAddress: (() => {
       const address = completeWorkshopAddress(shop);
       return address ? workshopAddressLines(address).join(", ") : null;
@@ -113,7 +118,15 @@ export async function setupWarranty(
   }
 }
 
-/** Finish or skip; finishing also records the optional "track workshop inventory" choice. */
+/** Step 3's optional "track workshop inventory" choice. */
+export async function recordPartsChoice(shop: Shop, parts: boolean): Promise<void> {
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: { settings: { ...settingsOf(shop), parts_enabled: parts } as Prisma.InputJsonValue },
+  });
+}
+
+/** Finish or skip; finishing can also record the optional "track workshop inventory" choice. */
 export async function completeSetup(
   shop: Shop,
   { skipped, partsEnabled: parts }: { skipped: boolean; partsEnabled: boolean | null },

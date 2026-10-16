@@ -28,7 +28,7 @@ import { settingsDeps } from "../../../app/services/admin/settings.server";
 import { checkWebhookUrl } from "../../../app/services/repairs/webhook-delivery.server";
 import { loadNotificationSettings } from "../../../app/services/notifications/shop-settings.server";
 import { flash, get, post, signInAs, type FormFields } from "../../support/admin";
-import { createCarePlanFor, createNotificationDeliveryFor, createShop } from "../../support/factories";
+import { createCarePlanFor, createNotificationDeliveryFor, createShop, WORKSHOP_SETTINGS } from "../../support/factories";
 
 type Data = Awaited<ReturnType<typeof loader>>;
 
@@ -218,6 +218,20 @@ describe("settings", () => {
     const settings = tradeInSettings(await reload(shop.id));
     expect([settings.credit_method, settings.credit_days]).toEqual(["discount_code", "90"]);
     expect((await show()).tradeIn?.credit_days).toBe("90");
+  });
+
+  it("Emails: the Order confirmation snippet, with previews of a repair and a Care order", async () => {
+    await setup({ ...WORKSHOP_SETTINGS });
+    const data = await show();
+    expect(data.snippet).toContain("attributes.shopcare_postage_slip_url");
+    expect(data.snippetPreviews.map((p) => p.label)).toEqual([
+      "A repair order (with your workshop details)",
+      "An order with a 2-year Care plan",
+    ]);
+    expect(data.snippetPreviews[0].html).toContain("Your repair #1042");
+    expect(data.snippetPreviews[0].html).toContain("Download your postage slip");
+    expect(data.snippetPreviews[0].html).toContain("Acme Repairs");
+    expect(data.snippetPreviews[1].html).toContain("covers all repairs to your Chelsea Boot");
   });
 
   it("Shopify Flow is off by default and can be switched on; there are no ShopCare email settings", async () => {

@@ -33,14 +33,16 @@ const collectionProducts = (products: { id: string; title: string; variants: { i
 });
 
 describe("setup", () => {
-  it("a new shop sees the three steps on the home page until it finishes", async () => {
+  it("a new shop sees the four steps on the home page until it finishes", async () => {
     const shop = await createShop({ shopifyDomain: "setup-admin.myshopify.com" });
     signInAs(shop);
-    for (const step of [1, 2, 3]) {
+    for (const step of [1, 2, 3, 4]) {
       const home = await get<Home>(ticketsLoader, `/app/tickets?setup_step=${step}`);
       expect(home.wizard?.step).toBe(step);
+      // Step 4 (optional): the Order confirmation snippet to copy into Shopify.
+      expect(Boolean(home.wizard?.snippet?.includes("attributes.repair_ticket_id"))).toBe(step === 4);
     }
-    expect((await get<Home>(ticketsLoader, "/app/tickets?setup_step=9")).wizard?.step).toBe(3);
+    expect((await get<Home>(ticketsLoader, "/app/tickets?setup_step=9")).wizard?.step).toBe(4);
     // Step 2 asks for the workshop address postage slips need.
     expect((await get<Home>(ticketsLoader, "/app/tickets?setup_step=2")).wizard?.workshopAddress).toBeNull();
     await prisma.shop.update({ where: { id: shop.id }, data: { settings: { ...WORKSHOP_SETTINGS } } });
@@ -125,8 +127,11 @@ describe("setup", () => {
     expect((await get<Home>(ticketsLoader, "/app/tickets?setup_step=3")).wizard?.partsEnabled).toBe(false);
     expect((await get<{ partsEnabled: boolean }>(appLoader, "/app")).partsEnabled).toBe(false);
 
-    await post(setupAction, "/app/setup", { intent: "complete", parts_enabled: ["0", "1"] });
+    // Step 3's Next records the choice and moves on to step 4.
+    const next = await post(setupAction, "/app/setup", { intent: "parts", parts_enabled: ["0", "1"] });
+    expect(flash(next).path).toBe("/app/tickets?setup_step=4");
     expect(partsEnabled(await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } }))).toBe(true);
+    expect(needsSetup(await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } }))).toBe(true);
     expect((await get<{ partsEnabled: boolean }>(appLoader, "/app")).partsEnabled).toBe(true);
   });
 

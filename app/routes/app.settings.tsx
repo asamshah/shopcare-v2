@@ -30,6 +30,12 @@ import { redirectWithFlash } from "../services/admin/flash.server";
 import { field, parse, readForm } from "../services/admin/form.server";
 import { hasSecret, saveSettings, sendKlaviyoTest } from "../services/admin/settings.server";
 import { gdprExports } from "../services/gdpr/customer-export.server";
+import {
+  ORDER_CONFIRMATION_SNIPPET,
+  previewOrders,
+  renderOrderConfirmationSnippet,
+} from "../services/emails/order-confirmation.server";
+import { OrderConfirmationSnippet, SHOPIFY_FLOW_URL, SHOPIFY_NOTIFICATIONS_URL } from "../components/order-confirmation-snippet";
 import { signedUrl } from "../lib/storage.server";
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -50,7 +56,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.carePlan.count({ where: { shopId: shop.id } }),
     prisma.notificationDelivery.findMany({ where: { shopId: shop.id }, orderBy: DELIVERIES_ORDER, take: 15 }),
   ]);
+  const samples = previewOrders(shop);
+  const [repairPreview, carePreview] = await Promise.all([
+    renderOrderConfirmationSnippet(samples.repair),
+    renderOrderConfirmationSnippet(samples.care),
+  ]);
   return {
+    snippet: ORDER_CONFIRMATION_SNIPPET,
+    snippetPreviews: [
+      { label: "A repair order (with your workshop details)", html: repairPreview },
+      { label: "An order with a 2-year Care plan", html: carePreview },
+    ],
     repairProducts: {
       mode: rp.mode === "collection" ? "collection" : "tag",
       tag: text(rp.tag),
@@ -356,21 +372,56 @@ export default function Settings() {
             </s-section>
           ) : null}
 
-          <s-section heading="Notifications">
+          <s-section heading="Emails">
             <s-stack direction="block" gap="base">
               <s-stack direction="block" gap="small-200">
-                <s-paragraph color="subdued">
-                  Send quote has Shopify email the customer the quote as an invoice, from your store: paying it accepts
-                  the quote. ShopCare adds how long it&apos;s valid and a link to decline after your message.
+                <s-paragraph>
+                  Shopify sends every email, from your store, in your branding: ShopCare sends none of its own.
                 </s-paragraph>
+                <s-unordered-list>
+                  <s-list-item>
+                    <s-text type="strong">The quote</s-text>: Send quote has Shopify email it as an invoice. Paying it
+                    accepts the quote; ShopCare adds how long it&apos;s valid and a link to decline.
+                  </s-list-item>
+                  <s-list-item>
+                    <s-text type="strong">&ldquo;Send your item to us&rdquo;</s-text> with the postage slip, and{" "}
+                    <s-text type="strong">Care plan confirmations</s-text>: a section of Shopify&apos;s Order
+                    confirmation, once you&apos;ve added the snippet below.
+                  </s-list-item>
+                  <s-list-item>
+                    <s-text type="strong">Your repaired item is on its way</s-text>: Shopify&apos;s Shipping
+                    confirmation, with tracking, when you Mark returned on the ticket.
+                  </s-list-item>
+                  <s-list-item>
+                    <s-text type="strong">Staff</s-text>: paid repair orders reach you through Shopify&apos;s staff
+                    order notifications (keep &ldquo;New order&rdquo; on in{" "}
+                    <s-link href={SHOPIFY_NOTIFICATIONS_URL} target="_top">
+                      Settings → Notifications
+                    </s-link>
+                    ); everything else is under Needs attention on the Tickets page.
+                  </s-list-item>
+                  <s-list-item>
+                    Request received, status updates and Care credit codes aren&apos;t emailed: customers see them on
+                    the Repair status page.
+                  </s-list-item>
+                </s-unordered-list>
+              </s-stack>
+
+              <s-stack direction="block" gap="small-200">
+                <s-heading>Order confirmation snippet</s-heading>
+                <OrderConfirmationSnippet snippet={d.snippet} previews={d.snippetPreviews} />
+              </s-stack>
+
+              <s-stack direction="block" gap="small-200">
+                <s-heading>Quote email</s-heading>
                 <s-text-field
-                  label="Quote email subject"
+                  label="Subject"
                   name="email[subject]"
                   value={d.email.subject}
                   placeholder={`Your repair quote from ${d.shopName}`}
                 ></s-text-field>
                 <s-text-area
-                  label="Quote email message"
+                  label="Message"
                   name="email[body]"
                   rows={3}
                   value={d.email.body}
@@ -393,32 +444,49 @@ export default function Settings() {
                   min={1}
                   max={365}
                   step={1}
-                  details="Days after purchase that the Add Care offer Flow trigger fires."
+                  details="Days after purchase that customers who can still add Care get the shopcare-care-offer-eligible tag (and the Add Care offer Flow trigger fires)."
                 ></s-number-field>
               </s-grid>
+
+              <s-stack direction="block" gap="small-200">
+                <s-heading>Optional: Shopify Flow</s-heading>
+                <s-paragraph color="subdued">
+                  ShopCare works fully without Flow. Turn it on to build your own emails on ShopCare&apos;s triggers,
+                  for example: Repair request submitted, Repair quote paid / declined / expired or Customer data request
+                  → &ldquo;Send internal email&rdquo; to your workshop; Add Care offer → Shopify Email&apos;s
+                  &ldquo;Send marketing email&rdquo; (only customers subscribed to email marketing get it); Repair
+                  status changed or Care credit issued → a customer email of your own. Without Flow, email the Add
+                  Care offer as a Shopify Email campaign to customers tagged shopcare-care-offer-eligible.
+                </s-paragraph>
+                <input type="hidden" name="notifications[flow]" value="0" />
+                <s-checkbox
+                  name="notifications[flow]"
+                  value="1"
+                  label="Send ShopCare events to Shopify Flow"
+                  details="Off by default. Each trigger shows up in Flow under ShopCare."
+                  {...checkedIf(d.notifications.flow)}
+                ></s-checkbox>
+                <s-stack direction="inline">
+                  <s-button href={SHOPIFY_FLOW_URL} target="_top">
+                    Open Shopify Flow
+                  </s-button>
+                </s-stack>
+              </s-stack>
             </s-stack>
           </s-section>
 
           <s-section heading="Advanced">
             <details className="settings-advanced">
               <summary style={{ cursor: "pointer", marginBottom: "1rem" }}>
-                Integrations and Shopify Flow. Most shops don&apos;t need to change these.
+                Klaviyo and the outbound webhook. Most shops don&apos;t need to change these.
               </summary>
               <s-stack direction="block" gap="base">
                 <s-stack direction="block" gap="small-200">
-                  <s-heading>Shopify Flow and Klaviyo</s-heading>
+                  <s-heading>Klaviyo</s-heading>
                   <s-paragraph color="subdued">
-                    Optional: ShopCare can also tell Shopify Flow or Klaviyo what happened (Care bought, Care offer,
-                    credit code, repair status, quotes paid / declined / expired), to build your own automations on.
+                    Optional: ShopCare can also tell Klaviyo what happened (Care bought, Care offer, credit code, repair
+                    status, quotes paid / declined / expired), to build your own flows on.
                   </s-paragraph>
-                  <input type="hidden" name="notifications[flow]" value="0" />
-                  <s-checkbox
-                    name="notifications[flow]"
-                    value="1"
-                    label="Shopify Flow and Shopify Email"
-                    details="In Shopify Flow or Marketing → Automations, start a workflow from a ShopCare trigger and add a “Send marketing email” step."
-                    {...checkedIf(d.notifications.flow)}
-                  ></s-checkbox>
                   <s-password-field
                     label="Klaviyo private API key"
                     name="klaviyo_api_key"

@@ -1,198 +1,182 @@
-# Going live — wiring checklist & current state
+# Going live: checklist and current state
 
-**15-10-2026: moved to a new app.** The original app (client ID `6284fe18…`) could
-no longer be found by the CLI, so a fresh **ShopCare** app was created in Partner org
-*Hype Park* (client ID `35f17691b22cc66e2dfa8324395f96d6`). Its dev store isn't
-chosen yet: `shopify app dev` asks on first run. The old app's leaked secret no
-longer matters (that app isn't used). `.env` holds the new app's key/secret
-(`shopify app env pull --env-file .env`).
+ShopCare v2 (this repo, TypeScript on Netlify) replaces the Rails app. The
+Shopify app itself doesn't change: it's the **ShopCare** app in Partner org
+*Hype Park* (client ID `35f17691b22cc66e2dfa8324395f96d6`, created 15-10-2026
+after the original app could no longer be found by the CLI). v2 links to it
+with `shopify app config link` and is deployed with `shopify app deploy`; the
+extension uids already belong to it. Its dev store is chosen on the first
+`shopify app dev`; the earlier Rails wiring used **asamlabs.myshopify.com**.
 
-Before that, the app was **wired to a live dev store** (Partner org *Hype Park*,
-dev store **asamlabs.myshopify.com**). Embedded admin, App Proxy intake, and
-order-history all work end-to-end. The one open item is full purchase history
-(see "Pick up here" below).
+The deploy steps (Neon, Resend, Netlify, Shopify) are in the README's
+[Deploy](../README.md#deploy) section. This file is what to check once it's up.
 
 ---
 
-## ▶ Pick up here (tomorrow): full purchase history needs `read_all_orders`
+## Scope change: `write_customers` needs re-approval
+
+v2 asks for `write_customers` instead of `read_customers` (the rest of the
+scopes are unchanged). It's needed so that unsubscribing from ShopCare's "Add
+Care" marketing email also updates the customer's email marketing consent in
+Shopify (`customerEmailMarketingConsentUpdate`), so the store and ShopCare
+agree.
+
+- `shopify app deploy` pushes the new scope list.
+- Each store that already has ShopCare must **re-approve**: open ShopCare in
+  the store's admin; Shopify shows the permission prompt (the
+  `app/scopes_update` webhook records the change). Until it's approved, the
+  unsubscribe still works inside ShopCare (suppression list) but Shopify's
+  consent isn't updated.
+- New installs get it in the normal install prompt.
+
+## Still open: full purchase history needs `read_all_orders`
 
 **Symptom:** the storefront repair form's step 1 shows "We couldn't find any
-purchases on your account," even for a logged-in customer who has an order.
+purchases on your account" for a logged-in customer whose order is older than
+60 days. The default `read_orders` scope only exposes the **last 60 days**.
 
-**Root cause (confirmed):** the default `read_orders` scope only exposes orders
-from the **last 60 days**. The test customer's order (#1002, the Snowboard) is
-from February — older than 60 days — so it's invisible. Orders within 60 days
-*do* show.
+**Fix (Shopify-gated scope):**
+1. Partner Dashboard → Apps → **ShopCare → API access → Protected customer data
+   access** → request access. Reason: *"Show customers their past purchases so
+   they can request repairs: older items are the most likely to need repair."*
+2. Wait for approval (reviewed, not instant).
+3. Add `read_all_orders` to `[access_scopes] scopes` in `shopify.app.toml` and
+   to `SCOPES` in the Netlify env, then `shopify app deploy` and re-approve in
+   each store's admin.
 
-**The fix — request `read_all_orders` (Shopify-gated scope):**
-1. Partner Dashboard → Apps → **ShopCare → API access → Protected customer data access**
-   → request access. Reason to give:
-   *"Show customers their past purchases so they can request repairs — older items
-   are the most likely to need repair."*
-2. Wait for Shopify to grant it (it's reviewed; not instant).
-3. Once granted, re-add the scope (it's **one line**, two places — a comment in the
-   code marks it):
-   - `config/initializers/shopify_app.rb` → `config.scope` (add `read_all_orders`)
-   - `shopify.app.toml` → `[access_scopes] scopes` (add `read_all_orders`)
-4. `shopify app deploy`, then re-open ShopCare in admin to approve the new permission.
+⚠️ **Don't add `read_all_orders` before it's approved**: `shopify app dev` /
+`deploy` hard-error (`app_access └ read_all_orders ❌`).
 
-⚠️ **Do NOT add `read_all_orders` before it's approved** — `shopify app dev` /
-`deploy` will hard-error (`app_access └ read_all_orders ❌`) and break the preview.
-We hit this and reverted it.
-
-**To demo it sooner without approval:** place a *recent* order (within 60 days) for
-your customer account — it will show up as a card immediately.
+To demo sooner, place a recent order (within 60 days) for the customer account.
 
 ---
 
-## Known dev-environment gotchas (already solved, but they recur)
+## After the first deploy
 
-- **App Proxy URL is NOT auto-updated by `shopify app dev`.** Only the app URL +
-  OAuth redirects auto-update. The Cloudflare tunnel changes every restart, so each
-  time you restart `shopify app dev` you must:
-  ```sh
-  # paste the new tunnel host shown by `shopify app dev`
-  sed -i '' -E 's#https://[a-z0-9-]+\.trycloudflare\.com#https://NEW-HOST#g' shopify.app.toml
-  shopify app deploy
-  ```
-  To avoid this forever, use a stable tunnel: `ngrok http 3000 --url=https://<static>.ngrok-free.app`
-  then `shopify app dev --tunnel-url=https://<static>.ngrok-free.app:3000`, and deploy once.
-- **Rails host authorization** — App Proxy requests arrive with the shop's Host
-  header (`asamlabs.myshopify.com`). `config/environments/development.rb` now allows
-  `.myshopify.com` (fixed; was returning "Blocked hosts" HTML that the form read as
-  "couldn't reach the server").
-- **`web` dev command** must be `bin/rails server` (no `-p ${PORT}`) — the CLI runs
-  it without a shell, so `${PORT}` won't expand; Rails reads `ENV["PORT"]` itself.
-- **New customer accounts + App Proxy `logged_in_customer_id`** — Shopify's docs
-  (https://shopify.dev/docs/apps/build/online-store/app-proxies/authenticate-app-proxies)
-  say the proxy sends the logged-in customer's id and leave it empty only when
-  nobody is logged in; they don't distinguish classic and new customer accounts.
-  Developers report it blank on some requests (and stale after logout) on new
-  customer accounts, so the app doesn't rely on it alone. The theme blocks also
-  send a token Liquid signs for `customer`: `customer_id`, `customer_ts`,
-  `customer_sig` = HMAC-SHA256 of `"<id>:<ts>"` under a per-shop secret. The
-  secret is created on install (AfterAuthenticateJob), kept encrypted on the
-  Shop, and published as an app-data metafield on the app installation
-  (`app.metafields.shopcare.customer_signing_key` in Liquid; not visible in the
-  admin, the Storefront API or to other apps). Tokens last 24 hours, so a page
-  rendered earlier (page cache, a tab left open) still works; an expired or
-  tampered one means "logged out". `logged_in_customer_id` wins when present.
-  A bare id from the browser is never accepted — Shopify signs whatever query
-  the visitor sends. To rotate a shop's secret:
-  `bin/rails runner 'Shopify::CustomerSigningKey.new(Shop.find_by!(shopify_domain: "x.myshopify.com")).rotate!'`
-  (pages already open fall back to logged out until reloaded).
-  After install, `shop.settings["customer_signing_key_published_at"]` should be
-  set; if publishing failed, the next authenticate (admin load) retries. Still
-  to check on the dev store: log in with a new customer account and confirm
-  the repair form lists the customer's orders.
+### Shopify config
+- [ ] `npm run config:link` → the existing ShopCare app; URLs in
+      `shopify.app.toml` point at the Netlify site; `npm run deploy`.
+- [ ] Open ShopCare in the store admin, approve permissions. The first load
+      creates the Shop row, publishes the customer signing key (app-data
+      metafield) and queues the 60-day order backfill (Items shows the
+      import status).
+- [ ] `https://<store>.myshopify.com/apps/repairs/ping` → `{ "ok": true, "installed": true }`.
 
----
-
-## Remaining wiring / go-live steps
-
-### Credentials & run
-- [x] Partner app **ShopCare** (Hype Park) linked; `.env` has its key/secret.
-- Shopify CLI 3.86 needs a `package.json` at the app root (there's a minimal one with
-  CLI shortcuts: `npm run dev`, `npm run deploy`). Without it, `config use` / `app info` fail.
-- Flow trigger field `key`s may only contain letters and spaces (no hyphens or digits).
-- [x] `shopify app dev` runs the Rails app; embedded admin loads.
-
-### App Proxy (storefront) — works
-- `/apps/repairs/intake` → `/proxy/intake` (create ticket; signature verified)
+### App Proxy (storefront)
+- `/apps/repairs/intake` → `/proxy/intake` (create ticket; 10 per hour per
+  visitor, 300 per shop; photos must really be JPEG/PNG/WebP/HEIC)
 - `/apps/repairs/orders` → `/proxy/orders` (purchase history)
 - `/apps/repairs/status` → `/proxy/status` (JSON for the **Repair status** block)
-- `/apps/repairs/quotes/:token` (+ `/accept`, `/decline`) → `/proxy/quotes/…` (quote decision
-  page, returned as `application/liquid` so it renders inside the theme)
-- Subpath prefix `apps`, subpath `repairs`, proxy URL `https://<HOST>/proxy`.
+- `/apps/repairs/quotes/:token` (+ `/decline`) → the quote review page,
+  returned as `application/liquid` so it renders inside the theme
+- Subpath prefix `apps`, subpath `repairs`, proxy URL `https://<site>/proxy`
+  (unchanged from Rails, so the theme extension keeps working).
 
-### Theme App Extension (`extensions/repair-intake`)
-- [x] **Repair request** block (3-step wizard: choose item → issue → details).
-- [ ] Re-deploy after each change while the tunnel is current.
+### Theme app extension (`extensions/repair-intake`)
+- [ ] Add the **Repair request** block (and **Repair status** on a page; put
+      that page's URL in the block settings *and* in Settings → Notifications →
+      Repair status page, so repair emails link to it).
+- [ ] Logged-in customers on **new customer accounts**: confirm the repair
+      form lists their orders (the blocks send a Liquid-signed customer token,
+      because `logged_in_customer_id` can be blank there).
 
 ### Webhooks
-- [ ] `orders/paid` registered from `config.webhooks` on boot → pay a test draft
-      order → confirm `OrdersPaidJob` flips the ticket to `in_repair`.
-- [ ] `orders/paid` for an ordinary sale → confirm an Item (with cover, if a
-      warranty policy matches) appears under **Items**.
-- [ ] `refunds/create` (new in Phase 1) → refund a line → the Item shows *Refunded*
-      and its cover is cancelled. It's registered at runtime like `orders/paid`;
-      restart the app once so `add_registrations` picks it up.
+- [ ] Pay a test repair invoice → the ticket moves to *In repair*, staff get
+      the "quote paid" email.
+- [ ] An ordinary sale → an Item (with cover, if a warranty policy matches)
+      appears under **Items**.
+- [ ] Refund a line → the Item shows *Refunded* and its cover is cancelled.
+- [ ] Uninstall/reinstall on a dev store → the shop is marked uninstalled,
+      then reactivated.
 
-### Items + warranty (Phase 1)
+### Email (Resend)
+- [ ] Sending domain verified; Settings → Notifications: "Notify staff at"
+      and "Reply-to address" set; submit a test repair → the customer's
+      "repair received" and the staff "new repair request" emails arrive.
+- [ ] Resend webhook delivers to `/webhooks/email` (send to a bouncing address
+      → it appears on the suppression list and is skipped next time).
+- [ ] The "Add Care" offer goes out `care_offer_delay_days` after purchase
+      (Settings → Notifications, default 7) to customers with email marketing
+      consent; its unsubscribe link works.
+
+### Items + warranty
 - [ ] Create a warranty policy (admin → **Warranty**).
-- [ ] **Items → Import recent orders** (also queued automatically the first time a
-      shop authenticates). Only reaches back 60 days until `read_all_orders` is approved.
+- [ ] **Items → Import recent orders** (also queued on first install; 60 days
+      until `read_all_orders` is approved).
 
-### Care plans (Phase 4)
-- [ ] `shopify app deploy` adds the new scopes (`write_orders`, `write_discounts`) and the
-      Flow trigger extensions (`extensions/shopcare-flow-*`); re-open ShopCare in admin
-      to approve the new permissions.
-- [ ] Create a Care product in Shopify (e.g. “2-year Care”, not physical), then link it in
-      **Care plans → Add Care plan**.
-- [ ] Add the **Care offer** block to the product template and the **Add Care to a
-      purchase** block to a page; put that page's URL in Settings → Care plans.
-- [ ] Buy a product with Care → the item shows Care cover; refund the product → the
-      Care line is refunded (or a credit code issued, per Settings).
-- [ ] Shopify Flow: build a workflow from “Care plan activated” → send email; check
-      Settings → Recent notifications shows *Sent*.
-- [ ] Klaviyo (optional): paste a private key with Events write access, send a test event.
-- [ ] Optional hardening: a Cart validation Function to stop a Care product being
-      bought on its own (nested lines already remove it with its parent).
+### Care plans
+- [ ] Create a Care product in Shopify (e.g. "2-year Care", not physical), then
+      link it in **Care plans → Add Care plan**.
+- [ ] Add the **Care offer** block to the product template and the **Add Care
+      to a purchase** block to a page; put that page's URL in Settings → Care plans.
+- [ ] Buy a product with Care → the item shows Care cover; refund the product →
+      the Care line is refunded (or a credit code issued, per Settings).
+- [ ] A covered repair: the £0 quote completes itself (no invoice) and the
+      ticket goes straight to *In repair*.
+- [ ] Optional: Flow (Settings → Notifications → Flow, **off by default**) and
+      Klaviyo (private key with Events write access; "Send test").
+- [ ] Optional hardening: a Cart validation Function to stop a Care product
+      being bought on its own.
 
-### Trade-in (parked for V2 — skip for V1)
-Off by default (`Shop#trade_in_enabled?`); the blocks and Flow trigger are out of the
-extension (docs/ROADMAP.md §3.4). When it comes back:
-- [ ] Deploy adds the `write_store_credit_account_transactions` scope and the
-      “Trade-in status changed” Flow trigger; approve the new permission in admin.
-- [ ] Create a trade-in program (**Trade-ins → Trade-in programs**).
-- [ ] Add the **Trade-in offer** block next to Add to cart on the product template;
-      add a trade-in with a purchase → after payment it appears under **Trade-ins** as *Requested*.
-- [ ] Approve → receive → credit. Check the store credit shows on the customer
-      (store credit needs **new customer accounts** for customers to spend it; otherwise
-      set Settings → Trade-in to discount codes).
-- [ ] Switch on the **Trade-in request button** app embed and send a trade-in request from it.
+### Workshop (parts)
+- [ ] Settings → Workshop on; import parts (CSV); link repair services to
+      their recipes; complete a test ticket → stock is taken and the ticket's
+      costs recorded.
+
+### Trade-in (parked for V2: skip for V1)
+Off by default (`settings.trade_in_enabled`); the storefront endpoints answer
+"not available" even with the flag on (the storefront submission isn't
+ported), and the blocks and Flow trigger are out of the extension. The staff
+screens and workflow (approve → receive → credit) are ported. When it comes
+back: port `TradeIns::Submission` + the two proxy endpoints, create a
+trade-in program, add the **Trade-in offer** block, and remember store credit
+needs **new customer accounts** (otherwise use discount codes).
 
 ### Settings (in-app, per merchant)
-- [ ] Set the repair-product **tag** or **collection** so the picker is populated.
-- [ ] Set the quote email subject/message (Settings → Notifications), quote validity, repair
-      order tag, and (optional) outbound webhook URL. Customers need nothing else: Shopify's own
-      invoice email is the quote, from the store, to guests too. Send a test quote to yourself
-      and check the "Decline here" link and Pay now.
-- [ ] Staff alerts (recipe below): one Flow workflow per trigger you want emailed to the team.
-- [ ] `shopify app deploy` replaces the old “Repair quote sent / accepted” triggers with
-      **Repair quote paid** and **Repair quote expired** (the new one gets its `uid` on deploy);
-      delete any workflow still using the old triggers.
-- [ ] Production runs `ExpireQuotesJob` daily (`config/recurring.yml`) — make sure Solid Queue's
-      scheduler is running.
+- [ ] Repair-product **tag** or **collection**, so the picker is populated.
+- [ ] Quote validity, repair order tag, optional outbound webhook URL.
+      Shopify's own invoice email is the quote (to guests too). Send a test
+      quote to yourself and check the "Decline here" link and Pay now.
+- [ ] Unpaid quotes expire daily (`netlify/functions/daily-expire-quotes.mts`);
+      the scheduled functions show under Netlify → Functions.
 
 ### Production
-- [ ] Object storage: `config/storage.yml` `:amazon` + AWS_* env, set
-      `config.active_storage.service = :amazon` in production.
 - [ ] Apply for protected customer data access (PII + orders) for the public app.
+- [ ] Netlify Blobs holds photos and exports (nothing to configure on Netlify).
 
-## Flow recipe: staff alerts for repair quotes
+## Flow recipe: staff alerts for repair quotes (optional)
 
-ShopCare's quote triggers carry no customer reference, so they fire for guests too.
-For each of **Repair quote paid**, **Repair quote declined** and **Repair quote expired**:
+ShopCare emails staff itself ("Notify staff at"). If the merchant prefers Flow
+(Settings → Notifications → Flow on), for each of **Repair quote paid**,
+**Repair quote declined** and **Repair quote expired**:
 
 1. Shopify admin → **Flow** → **Create workflow** → **Select a trigger** → search
-   “Repair quote” → pick the trigger.
-2. **Add action** → **Send internal email**. To: your workshop inbox. Subject, e.g.
+   "Repair quote" → pick the trigger.
+2. **Add action** → **Send internal email**. To: the workshop inbox. Subject, e.g.
    `Repair #{{ticketNumber}} quote paid — {{productTitle}}` (Flow's variable picker
-   lists the trigger's fields: Ticket number, Product title, Customer name, Customer
-   email, Quote total, plus Order name / Reason / Valid until).
-3. Body, e.g.:
-   ```
-   {{customerName}} ({{customerEmail}}) paid {{quoteTotal}} — order {{orderName}}.
-   Start the repair: open ShopCare → Tickets → #{{ticketNumber}}.
-   ```
-   Declined: `Reason: {{reason}}`. Expired: `Was valid until {{validUntil}}`;
-   revise or resend the invoice from the ticket.
-4. **Turn on workflow**. Check Settings → Recent notifications shows *Sent*.
+   lists the fields: Ticket number, Product title, Customer name, Customer email,
+   Quote total, plus Order name / Reason / Valid until).
+3. Body, e.g. `{{customerName}} ({{customerEmail}}) paid {{quoteTotal}} — order
+   {{orderName}}.` Declined: `Reason: {{reason}}`. Expired: `Was valid until
+   {{validUntil}}`.
+4. **Turn on workflow**, and switch ShopCare's own staff emails off for the same
+   events to avoid duplicates. Check Settings → Recent notifications shows *Sent*.
 
-Use Flow's variable picker rather than typing the names above: it inserts the exact
-Liquid for each field.
+## Known dev-environment gotchas
 
-## Still to build (offline-able)
+- **App Proxy URL is not auto-updated by `shopify app dev`** (only the app URL
+  and OAuth redirects are). The tunnel changes every restart, so update
+  `[app_proxy].url` and `shopify app deploy`, or use a stable tunnel:
+  `shopify app dev --tunnel-url=https://<static>.ngrok-free.app:3000`.
+- **react-router is pinned at 7.18.2**: 7.18.3+ rejects action POSTs under the
+  dev tunnel (README → Gotchas).
+- **New customer accounts and `logged_in_customer_id`**: may be blank or
+  stale; the blocks also send a Liquid-signed token (`customer_id`,
+  `customer_ts`, `customer_sig`, HMAC under a per-shop key published as an
+  app-data metafield on install; 24 h). `logged_in_customer_id` wins when present.
+
+## Still to build
+
 - Product-context launch + eligibility rules for the intake form.
-- Billing (`config.billing` scaffold is commented out in the initializer).
+- Billing (pricing proposal in docs/ROADMAP.md §6).
+- Storefront trade-in (V2) and storefront registration (`Items::RegistrationSubmission`).

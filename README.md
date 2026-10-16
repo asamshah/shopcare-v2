@@ -37,7 +37,8 @@ app/
                      quotes (send/resend/revise/decision/cancel: the shared service contract),
                      payments, gdpr (customer export + redaction, shop redaction), parts, trade-ins,
                      storefront/* (App Proxy endpoints), admin/* (admin screens' loaders/actions logic)
-  jobs/              background job handlers + registry
+  jobs/              background job handlers + registry (webhook, notification, import-orders,
+                     outbound-webhook, care-offers, expire-quotes, notification-sweep, …)
   shopify.server.ts  @shopify/shopify-app-react-router setup (Prisma session storage)
   db.server.ts       Prisma client
 netlify/functions/   jobs-background.mts (Background Function); Scheduled: daily-prune.mts
@@ -47,7 +48,7 @@ prisma/              schema + migrations (Postgres; every Rails table, see docs/
 extensions/          theme app extension + Flow triggers (copied unchanged from Rails)
 parked/              Flow trigger not yet shipped (trade-in status)
 test/unit/           pure tests
-test/integration/    tests against a real Postgres
+test/integration/    tests against a real Postgres (routes, services, webhooks; e2e/ = whole journeys)
 test/support/        DB reset, factories, Shopify-signed request builders, fakes
 docs/                PORTING.md, BACKGROUND-WORK.md, and the Rails docs (ROADMAP, GOING-LIVE, …)
 ```
@@ -121,32 +122,84 @@ CI (`.github/workflows/ci.yml`) runs install, `prisma generate`,
 `prisma migrate deploy` against a Postgres service container, then typecheck,
 lint, tests and the Netlify build.
 
+## Environment variables
+
+All are in [`.env.example`](.env.example) with comments. On Netlify set them
+under Site configuration → Environment variables.
+
+| Variable | Needed | What |
+|---|---|---|
+| `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET` | always | the app's client credentials (`shopify app env show`) |
+| `SCOPES` | always | must match `[access_scopes]` in `shopify.app.toml` |
+| `SHOPIFY_APP_URL` | always | the Netlify site URL in production (the CLI sets the tunnel in dev) |
+| `DATABASE_URL` / `DIRECT_URL` | always | Neon pooled / direct connection strings |
+| `APP_ENCRYPTION_KEY` | always | `openssl rand -base64 32`; never change it without moving the old one to `APP_ENCRYPTION_PREVIOUS_KEYS` |
+| `BACKGROUND_DISPATCH` | Netlify | `netlify` |
+| `RESEND_API_KEY`, `EMAIL_FROM_DOMAIN` | to send email | Resend key and the verified sending domain (without them emails are only logged) |
+| `RESEND_WEBHOOK_SECRET` | with Resend | signing secret of the Resend webhook → `POST /webhooks/email` (bounces, complaints → suppression list) |
+| `SHOPIFY_APP_HANDLE` | if not `shopcare` | the app's handle in admin URLs; staff emails link to `https://admin.shopify.com/store/<store>/apps/<handle>/app/tickets/<id>` |
+| `EMAIL_DEFAULT_FROM_NAME`, `STORAGE_*`, `BACKGROUND_FUNCTIONS_URL`, `SHOP_CUSTOM_DOMAIN`, `APP_ENCRYPTION_PREVIOUS_KEYS` | optional | see `.env.example` |
+
 ## Deploy
 
-### Netlify (the app server)
+ShopCare is already a Shopify app (Partner org *Hype Park*, client ID
+`35f17691b22cc66e2dfa8324395f96d6`): link to it, don't create a new one. The
+extension uids in `extensions/*/shopify.extension.toml` belong to it.
+
+### 1. Database (Neon)
+
+Create a Neon project (or enable Netlify DB, which provisions Neon). Copy the
+**pooled** connection string (host contains `-pooler`, add
+`?sslmode=require&pgbouncer=true&connect_timeout=15`) to `DATABASE_URL` and
+the **direct** one to `DIRECT_URL`. Make a Neon branch for Deploy Previews and
+Branch deploys: the build runs migrations, so those contexts need their own
+database URLs.
+
+### 2. Email (Resend)
+
+Add and verify the sending domain (`EMAIL_FROM_DOMAIN`, e.g.
+`mail.shopcare.app`; mail goes from `notifications@` it), create an API key
+(`RESEND_API_KEY`), and add a webhook to `https://<site>/webhooks/email` for
+`email.bounced` and `email.complained`; its signing secret is
+`RESEND_WEBHOOK_SECRET`.
+
+### 3. Netlify (the app server)
 
 The build uses Netlify's official React Router adapter,
 [`@netlify/vite-plugin-react-router`](https://docs.netlify.com/frameworks/react-router/)
-(in `vite.config.ts`). It wraps the server build in a Netlify Function, so SSR,
-loaders and actions run in Netlify Functions (Node.js). `netlify.toml` sets the
-build (`npm run build:netlify`: `prisma generate`, `prisma migrate deploy`,
-`react-router build`), publish dir `build/client`, and bundles Prisma's engine
-with the functions.
+(in `vite.config.ts`): SSR, loaders and actions run in a Netlify Function.
+`netlify.toml` sets the build (`npm run build:netlify`: `prisma generate`,
+`prisma migrate deploy`, `react-router build`), publish dir `build/client`,
+our functions in `netlify/functions/` (background jobs + the scheduled ones:
+prune, care offers, quote expiry, notification sweep) and bundles Prisma's
+engine.
 
-1. Create a Neon project (or enable Netlify DB, which provisions Neon). Copy
-   the **pooled** connection string to `DATABASE_URL` and the **direct** one to
-   `DIRECT_URL`.
-2. Netlify site → Environment variables: everything in `.env.example`.
-   `SHOPIFY_APP_URL` = the site URL. Set `BACKGROUND_DISPATCH=netlify`. Use a
-   separate database (Neon branch) for Deploy Preview and Branch deploy
-   contexts, because the build runs migrations.
-3. Push to the production branch. Netlify builds and deploys.
+1. New site from the git repo, production branch `main`.
+2. Set the environment variables above (`SHOPIFY_APP_URL` = the site URL,
+   `BACKGROUND_DISPATCH=netlify`), with the Neon branch URLs scoped to Deploy
+   Previews and Branch deploys.
+3. Deploy. `https://<site>/proxy/ping` answering 400 (unsigned request)
+   shows the function is up; after step 4,
+   `https://<store>.myshopify.com/apps/repairs/ping` answers
+   `{ "ok": true, "installed": true }`.
 
-### Shopify (config and extensions)
+### 4. Shopify (config and extensions)
 
-Set `application_url`, `[auth].redirect_urls` and `[app_proxy].url` in
-`shopify.app.toml` to the Netlify URL, then `npm run deploy`. This pushes
-scopes, webhook subscriptions, the App Proxy and the extensions.
+```shell
+npm run config:link     # shopify app config link → pick the existing ShopCare app
+```
+
+In `shopify.app.toml` set `application_url`, `[auth].redirect_urls`
+(`https://<site>/auth/callback`) and `[app_proxy].url` (`https://<site>/proxy`)
+to the Netlify site, then:
+
+```shell
+npm run deploy          # shopify app deploy: scopes, webhooks, App Proxy, extensions
+```
+
+Open ShopCare in each store's admin and approve the changed permissions (the
+scopes now include `write_customers`; see
+[`docs/GOING-LIVE.md`](docs/GOING-LIVE.md)).
 
 ## More docs
 

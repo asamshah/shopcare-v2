@@ -3,6 +3,7 @@ import { Form, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { z } from "zod";
 import { selectedIf } from "../components/attrs";
+import { DownloadButton } from "../components/download-button";
 import { parseId, requireAdmin } from "../services/admin/context.server";
 import { type Flash, redirectWithFlash } from "../services/admin/flash.server";
 import { field, parse, readForm, zDecimal, zOptionalId, zText } from "../services/admin/form.server";
@@ -12,10 +13,12 @@ import {
   addTicketPart,
   declineTicketQuote,
   linkTicketItem,
+  markTicketReceived,
   planParts,
   removeLineItem,
   removeTicketPart,
   resendTicketInvoice,
+  resendTicketPostageEmail,
   reviseTicketQuote,
   sendTicketQuote,
   ticketDetail,
@@ -32,7 +35,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
 const INTENTS = [
   "status", "note", "link_item", "add_line", "remove_line", "send", "resend", "revise", "decline", "cover",
-  "plan_parts", "add_part", "update_part", "remove_part",
+  "plan_parts", "add_part", "update_part", "remove_part", "mark_received", "resend_postage",
 ] as const;
 
 const zQuantity = z
@@ -120,6 +123,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     case "remove_part":
       flash = await removeTicketPart(shop, id, parseId(f("ticket_part_id")));
       break;
+    case "mark_received":
+      flash = await markTicketReceived(shop, id);
+      break;
+    case "resend_postage":
+      flash = await resendTicketPostageEmail(shop, id);
+      break;
   }
   return redirectWithFlash(`/app/tickets/${id}`, flash);
 };
@@ -169,6 +178,8 @@ export default function Ticket() {
               </s-stack>
             </Form>
           </s-section>
+
+          <PostageSection d={d} />
 
           <s-section heading="Quotation">
             <s-stack direction="block" gap="base">
@@ -548,6 +559,60 @@ function QuoteDecision({ decision }: { decision: Decision }) {
         </Form>
       ) : null}
     </s-stack>
+  );
+}
+
+/** The customer posts the item: postage slip, resend, and "Mark received". */
+function PostageSection({ d }: { d: Detail }) {
+  const { postage, ticket } = d;
+  if (!postage.awaiting && !postage.receivedAt && !postage.canMarkReceived) return null;
+  return (
+    <s-section heading="Item">
+      <s-stack direction="block" gap="small-200">
+        {postage.receivedAt ? (
+          <s-text>Received at the workshop {postage.receivedAt}.</s-text>
+        ) : postage.awaiting ? (
+          <s-text>
+            Waiting for the customer to post the item
+            {postage.emailsSent > 0
+              ? `. Postage slip emailed${postage.emailsSent > 1 ? ` ${postage.emailsSent} times` : ""}.`
+              : "."}
+          </s-text>
+        ) : (
+          <s-text color="subdued">
+            Not received yet. Once the quote is paid the customer is emailed a postage slip; if the item is already
+            here, mark it received and paying starts the repair.
+          </s-text>
+        )}
+        {postage.workshopAddress ? null : (
+          <s-banner tone="warning">
+            No postage slips until your workshop address is set.{" "}
+            <s-link href="/app/settings">Add it in Settings → Repairs</s-link>.
+          </s-banner>
+        )}
+        <s-stack direction="inline" gap="small-200">
+          {postage.canMarkReceived ? (
+            <Form method="post">
+              <Intent value="mark_received" />
+              <s-button type="submit" variant={postage.awaiting ? "primary" : "secondary"} icon="check">
+                Mark received
+              </s-button>
+            </Form>
+          ) : null}
+          {postage.canDownload ? (
+            <DownloadButton href={`/app/tickets/${ticket.id}/postage_slip`}>Download postage slip</DownloadButton>
+          ) : null}
+          {postage.canResend && postage.workshopAddress ? (
+            <Form method="post">
+              <Intent value="resend_postage" />
+              <s-button type="submit" icon="email">
+                Resend postage email
+              </s-button>
+            </Form>
+          ) : null}
+        </s-stack>
+      </s-stack>
+    </s-section>
   );
 }
 

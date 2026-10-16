@@ -40,7 +40,13 @@ import {
   REPAIR_TICKET_STATUSES,
   repairTicketSearchWhere,
 } from "../../models/repair-ticket.server";
-import { partsEnabled, proxyUrl, settingsOf } from "../../models/shop.server";
+import {
+  completeWorkshopAddress,
+  partsEnabled,
+  proxyUrl,
+  settingsOf,
+  workshopAddressLines,
+} from "../../models/shop.server";
 import { createTicketActivity } from "../../models/ticket-activity.server";
 import { createTicketPart, isConsumed, ticketPartCost, validateTicketPart } from "../../models/ticket-part.server";
 import { assertValid, d, jsonObject, ValidationError } from "../../models/validation.server";
@@ -51,7 +57,8 @@ import { declineQuote, expireQuote } from "../quotes/decision.server";
 import { resendInvoice } from "../quotes/resend.server";
 import { reviseQuote } from "../quotes/revise.server";
 import { sendQuote } from "../quotes/send.server";
-import { changeTicketStatus } from "../repairs/ticket-status.server";
+import { resendPostageEmail } from "../repairs/item-postage.server";
+import { changeTicketStatus, markItemReceived } from "../repairs/ticket-status.server";
 import { repairProductSettings } from "../repairs/service-import.server";
 import { orNotFound, requireParts } from "./context.server";
 import type { Flash } from "./flash.server";
@@ -190,6 +197,8 @@ export async function ticketDetail(shop: Shop, admin: AdminGraphqlClient, id: nu
 
   const token = quotation ? decisionToken(quotation) : null;
   const costs = jsonObject(ticket.costs);
+  const workshop = completeWorkshopAddress(shop);
+  const open = !["completed", "cancelled", "rejected"].includes(ticket.status);
   const address = jsonObject(ticket.customerAddress);
   const addressLine = ["address1", "city", "zip", "country"]
     .map((k) => String(address[k] ?? "").trim())
@@ -217,6 +226,16 @@ export async function ticketDetail(shop: Shop, admin: AdminGraphqlClient, id: nu
       description: ticket.description,
     },
     statuses: REPAIR_TICKET_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })),
+    postage: {
+      awaiting: ticket.status === "awaiting_item",
+      receivedAt: ticket.itemReceivedAt ? formatDateTime(ticket.itemReceivedAt) : null,
+      /** One line, or null until Settings → Repairs has a complete workshop address. */
+      workshopAddress: workshop ? workshopAddressLines(workshop).join(", ") : null,
+      emailsSent: ticket.postageEmailsSent,
+      canMarkReceived: open && !ticket.itemReceivedAt,
+      canResend: ticket.status === "awaiting_item" && Boolean(ticket.customerEmail?.trim()),
+      canDownload: open && workshop !== null,
+    },
     quotation: quotation
       ? {
           status: quotation.status,
@@ -608,3 +627,19 @@ export async function removeTicketPart(shop: Shop, ticketId: number, ticketPartI
   return { notice: "Part removed." };
 }
 
+
+// --- Postage (the customer posts the item) ----------------------------------------------
+
+/** "Mark received": the customer's parcel arrived. */
+export async function markTicketReceived(shop: Shop, ticketId: number): Promise<Outcome> {
+  const ticket = await findTicket(shop, ticketId);
+  const result = await markItemReceived({ shopId: shop.id, ticketId: ticket.id, actor: "staff" });
+  return result.ok ? { notice: result.message } : { alert: result.error };
+}
+
+/** "Resend postage email". */
+export async function resendTicketPostageEmail(shop: Shop, ticketId: number): Promise<Outcome> {
+  const ticket = await findTicket(shop, ticketId);
+  const result = await resendPostageEmail(shop, ticket.id);
+  return result.ok ? { notice: result.message } : { alert: result.error };
+}

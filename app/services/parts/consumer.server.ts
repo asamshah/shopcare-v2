@@ -34,7 +34,10 @@ export async function consumeTicketParts(
   }: { by?: string; db?: Db; client?: AdminGraphqlClient | null; now?: Date } = {},
 ): Promise<ConsumeResult> {
   if ((await db.ticketPart.count({ where: { repairTicketId: ticket.id } })) === 0) {
-    await planTicketParts(ticket, { db, client });
+    await planTicketParts(
+      { shopId: ticket.shopId, ticketId: ticket.id },
+      { db, client: client ?? undefined },
+    );
   }
   const parts = await db.ticketPart.findMany({
     where: { repairTicketId: ticket.id, consumedAt: null },

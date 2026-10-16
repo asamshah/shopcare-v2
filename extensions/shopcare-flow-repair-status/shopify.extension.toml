@@ -4,7 +4,7 @@ name = "Repair status changed"
 uid = "bcbcf82c-d1ec-6690-282f-e2b51b094926ca127497"
 type = "flow_trigger"
 handle = "shopcare-repair-status"
-description = "A customer's ShopCare repair moved to a new status."
+description = "A customer's ShopCare repair moved to a new status: New, Assessing, Quoted, Quote declined, Awaiting item, Received, In repair, Ready, Completed, Cancelled or Rejected."
 
   [settings]
 

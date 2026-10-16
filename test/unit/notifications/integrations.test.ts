@@ -11,6 +11,7 @@ import {
   EVENTS,
   type EventData,
   type EventName,
+  type RepairStatus,
 } from "../../../app/services/notifications/events.server";
 import { FlowClient } from "../../../app/services/notifications/flow-client.server";
 import { CUSTOMER_MARKETING_CONSENT_QUERY } from "../../../app/shopify/customers.server";
@@ -371,5 +372,25 @@ describe("shopifyMarketingConsent", () => {
     expect(fake.calls[0].variables).toEqual({
       id: "gid://shopify/Customer/77",
     });
+  });
+});
+
+describe("Repair status changed trigger: status values", () => {
+  it("sends every ticket status humanised, the postage statuses included", () => {
+    // REPAIR_TICKET_STATUSES (app/models/repair-ticket.server.ts; checked in its own test).
+    const statuses: RepairStatus[] = [
+      "new", "assessing", "quoted", "quote_declined", "awaiting_item", "received",
+      "in_repair", "ready", "completed", "cancelled", "rejected",
+    ];
+    const values = statuses.map(
+      (status) => EVENTS.repair_status_changed.fields({ ticketId: 1, status, productTitle: "Boot" }).Status,
+    );
+    expect(values).toEqual([
+      "New", "Assessing", "Quoted", "Quote declined", "Awaiting item", "Received",
+      "In repair", "Ready", "Completed", "Cancelled", "Rejected",
+    ]);
+    // The trigger's description lists them for merchants building workflows.
+    const toml = readFileSync("extensions/shopcare-flow-repair-status/shopify.extension.toml", "utf8");
+    for (const value of values) expect(toml).toContain(value);
   });
 });

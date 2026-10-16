@@ -98,7 +98,8 @@ repair” link.
 ## Other blocks
 - **Add Care to a purchase** — add a Care plan to something already bought, within the plan's offer window (`_shopcare_item`). Each plan row leads with its badge (“ShopCare – 2 year plan · £15 · add by …”).
 - **Repair status** — a logged-in customer's repairs, each with the cover badge it was raised under, and "Quote ready – review & pay"
-  (the quote's review page) while a sent quote awaits payment.
+  (the quote's review page) while a sent quote awaits payment. Once it's paid (or covered) and we're waiting for the item,
+  "Download postage slip" opens the PDF to print: an address label for the parcel and a packing slip for inside.
 
 The quote review page itself isn't a block: `/apps/repairs/quotes/:token` returns
 Liquid, so Shopify renders it inside the theme (lines, total, expiry, **Pay now** —
@@ -127,6 +128,7 @@ Repair request      GET  /apps/repairs/orders            → /proxy/orders      
 Care                GET  /apps/repairs/care_plans        → /proxy/care_plans
                     GET  /apps/repairs/care_offers       → /proxy/care_offers
 Repair status       GET  /apps/repairs/status            → /proxy/status
+Postage slip        GET  /apps/repairs/tickets/:id/postage-slip → /proxy/tickets/:id/postage-slip (PDF; signed link or the owner)
 Quote decision      GET  /apps/repairs/quotes/:token     → /proxy/quotes/:token (+ POST accept / decline)
 Cart                POST /cart/add.js                    (Shopify Cart AJAX API)
 ```

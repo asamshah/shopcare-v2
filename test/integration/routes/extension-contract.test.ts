@@ -9,6 +9,7 @@
  */
 import type { Shop } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import prisma from "../../../app/db.server";
 import { careCoverFor, createCover } from "../../../app/models/cover.server";
 import { issueDecisionToken } from "../../../app/models/quotation.server";
 import { loader as carePlans } from "../../../app/routes/proxy.care_plans";
@@ -26,6 +27,7 @@ import {
   createWarrantyCover,
   createWarrantyPolicyFor,
   daysAgo,
+  WORKSHOP_SETTINGS,
 } from "../../support/factories";
 import { orderNode } from "../../support/orders";
 import {
@@ -65,6 +67,7 @@ const STATUS = { ok: true, logged_in: true, tickets: [
   { id: 7, status_label: "Quoted", product_title: "Boot", cover: { kind: "care", name: "18-month Care", badge: "ShopCare – 18 month plan", ends_at: "2028-03-01" }, quotation: { status: "sent", currency: "GBP", subtotal: "24.00", review_url: "/apps/repairs/quotes/abc" } },
   { id: 8, status_label: "Quoted", product_title: "Shoe", quotation: { status: "paid", currency: "GBP", subtotal: "18.00" } },
   { id: 9, status_label: "Completed", product_title: "Sandal", cover: { kind: "warranty", name: "12-month warranty", badge: "12-month warranty", ends_at: "2027-03-12" } },
+  { id: 10, status: "awaiting_item", status_label: "Awaiting item", product_title: "Loafer", quotation: { status: "paid", currency: "GBP", subtotal: "30.00" }, postage_slip_url: "/apps/repairs/tickets/10/postage-slip?expires=1793000000&token=abc" },
 ] };
 const CARE_OFFERS = { ok: true, logged_in: true, currency: "GBP", items: [
   { item_id: 3, product_title: "Aria Boot", plans: [Object.assign({}, PLAN, { badge: "ShopCare – 2 year plan", offer_ends: "2026-11-01" })] },
@@ -206,6 +209,16 @@ describe("extension contract: the storefront fixtures replayed against the route
 
     const body = (await (await runRoute(status, signedGet("/proxy/status", domain, { customerId: "77" }))).json()) as typeof STATUS;
     expectCovers(body, { ...STATUS, tickets: [STATUS.tickets[0]] });
+  });
+
+  it("status (repair_status block): a repair waiting for the item links its postage slip", async () => {
+    fakes = fakeStorefront();
+    shop = await prisma.shop.update({ where: { id: shop.id }, data: { settings: { currency: "GBP", ...WORKSHOP_SETTINGS } } });
+    const awaiting = await createRepairTicketFor(shop, { shopifyCustomerId: "77", productTitle: "Loafer", status: "awaiting_item" });
+    await createQuotationFor(awaiting.id, { status: "paid", subtotal: 30 });
+
+    const body = (await (await runRoute(status, signedGet("/proxy/status", domain, { customerId: "77" }))).json()) as typeof STATUS;
+    expectCovers(body, { ...STATUS, tickets: [STATUS.tickets[3]] });
   });
 
   it("care_offers (Add Care later)", async () => {

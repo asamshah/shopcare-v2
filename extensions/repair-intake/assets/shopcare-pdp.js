@@ -2,6 +2,7 @@
 //   [data-care-offer]      product page: Care plans as Apple-style cards
 //   [data-care-later]      add Care to something the customer already owns
 //   [data-repair-status-list]  the customer's repairs, with a quote to review & pay
+//                              and, while we wait for the item, its postage slip
 //
 // Product-page offers register with one Add to cart coordinator per product
 // form. With no offer chosen, the theme's own Add to cart runs untouched. When
@@ -496,6 +497,13 @@
           var quote = ticket.quotation;
           if (quote && quote.review_url) {
             row.appendChild(link("Quote ready – review & pay", quote.review_url));
+          }
+          // Waiting for the item: the printable label + packing slip (a PDF).
+          if (ticket.postage_slip_url) {
+            var slip = link("Download postage slip", ticket.postage_slip_url);
+            slip.target = "_blank";
+            slip.rel = "noopener";
+            row.appendChild(slip);
           }
           card.appendChild(row);
           list.appendChild(card);

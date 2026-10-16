@@ -529,16 +529,24 @@ async function repairStatus() {
   const env = setup(await block("repair_status"), [["/apps/repairs/status", { ok: true, logged_in: true, tickets: [
     { id: 7, status_label: "Quoted", product_title: "Boot", cover: { kind: "care", name: "18-month Care", badge: "ShopCare – 18 month plan", ends_at: "2028-03-01" }, quotation: { status: "sent", currency: "GBP", subtotal: "24.00", review_url: "/apps/repairs/quotes/abc" } },
     { id: 8, status_label: "Quoted", product_title: "Shoe", quotation: { status: "paid", currency: "GBP", subtotal: "18.00" } },
-    { id: 9, status_label: "Completed", product_title: "Sandal", cover: { kind: "warranty", name: "12-month warranty", badge: "12-month warranty", ends_at: "2027-03-12" } }
+    { id: 9, status_label: "Completed", product_title: "Sandal", cover: { kind: "warranty", name: "12-month warranty", badge: "12-month warranty", ends_at: "2027-03-12" } },
+    { id: 10, status: "awaiting_item", status_label: "Awaiting item", product_title: "Loafer", quotation: { status: "paid", currency: "GBP", subtotal: "30.00" }, postage_slip_url: "/apps/repairs/tickets/10/postage-slip?expires=1793000000&token=abc" }
   ] }]]);
   env.run("shopcare-pdp.js");
   await tick();
   const { document } = env;
   const links = [...document.querySelectorAll("[data-status-list] a")];
-  assert.strictEqual(links.length, 1, "a link only for the quote awaiting payment");
+  assert.strictEqual(links.length, 2, "links only for the quote awaiting payment and the item awaited");
   assert.strictEqual(links[0].textContent, "Quote ready – review & pay");
   assert.strictEqual(links[0].getAttribute("href"), "/apps/repairs/quotes/abc");
-  assert.strictEqual(document.querySelectorAll("[data-status-list] .shopcare__item").length, 3);
+  assert.strictEqual(document.querySelectorAll("[data-status-list] .shopcare__item").length, 4);
+  // Waiting for the item: the postage slip, in a new tab, styled like the theme's buttons.
+  const slip = links[1];
+  assert.strictEqual(slip.textContent, "Download postage slip");
+  assert.strictEqual(slip.getAttribute("href"), "/apps/repairs/tickets/10/postage-slip?expires=1793000000&token=abc");
+  assert.strictEqual(slip.target, "_blank");
+  assert.strictEqual(slip.className, "button shopcare__button");
+  assert.match(slip.closest(".shopcare__item").textContent, /Repair #10 · Awaiting item/);
   const [care, , warranty] = document.querySelectorAll("[data-status-list] .shopcare__item");
   assert.strictEqual(care.querySelector(".shopcare__badge--care").textContent, "ShopCare – 18 month plan");
   assert.match(care.querySelector(".shopcare__badge-detail").textContent, /^Covered until .+2028$/);
@@ -650,7 +658,7 @@ describe("storefront: the theme extension in jsdom", () => {
   it("Request form: order + email lookup (match and mismatch); a rejected item isn't confirmed", orderLookup);
   it("Request form: details row aligned (Email no longer sits below Name)", detailsRow);
   it("App embed: button opens and closes the form", launcher);
-  it("Repair status: a quote to review & pay, cover badges", repairStatus);
+  it("Repair status: a quote to review & pay, the postage slip while we wait for the item, cover badges", repairStatus);
   it("Add Care later: plan rows carry the cover badge, added tagged to the item", careLater);
   it("Logged-in customer: proxy URLs carry a token signed the way the app verifies it", signedCustomerToken);
 });

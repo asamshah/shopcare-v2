@@ -12,6 +12,8 @@ const TICKET_STATUS_TONES: Record<string, Tone> = {
   assessing: "caution",
   quoted: "warning",
   quote_declined: "critical",
+  awaiting_item: "warning",
+  received: "info",
   in_repair: "caution",
   ready: "success",
   completed: "success",

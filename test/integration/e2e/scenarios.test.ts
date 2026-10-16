@@ -115,7 +115,7 @@ describe("end-to-end scenarios", () => {
   const events = async (event: string) =>
     (await prisma.notificationDelivery.findMany({ where: { event }, orderBy: { id: "asc" } })).map((d) => d.channel);
 
-  it("(a) intake → quote → paid → in repair → completed (stock used) → shown on the status page", async () => {
+  it("(a) intake → quote → paid → awaiting item → completed (stock used) → shown on the status page", async () => {
     shop = await prisma.shop.update({
       where: { id: shop.id },
       data: { settings: { ...(shop.settings as object), parts_enabled: "1" } },
@@ -159,7 +159,7 @@ describe("end-to-end scenarios", () => {
     };
     expect((await deliver(ordersPaid, "orders/paid", paid)).status).toBe(200);
     await deliver(ordersPaid, "orders/paid", paid); // retried delivery
-    expect([(await ticketOf(ticketId)).status, (await quoteFor(ticketId)).status]).toEqual(["in_repair", "paid"]);
+    expect([(await ticketOf(ticketId)).status, (await quoteFor(ticketId)).status]).toEqual(["awaiting_item", "paid"]);
     expect(await events("quote_paid")).toContain("staff_email");
     expect(await prisma.item.count()).toBe(0); // a repair invoice isn't a purchase
 
@@ -207,8 +207,9 @@ describe("end-to-end scenarios", () => {
     expect(await sendQuote({ shopId: shop.id, quotationId: draft.id, actor: "staff", client: api.client, enqueue: async () => {} })).toEqual({
       ok: true,
       warranty: true,
+      ticketStatus: "awaiting_item",
     });
-    expect((await ticketOf(ticketId)).status).toBe("in_repair");
+    expect((await ticketOf(ticketId)).status).toBe("awaiting_item");
     expect((await quoteFor(ticketId)).status).toBe("paid");
     expect(api.kinds()).not.toContain("invoice"); // nothing to pay, so no invoice email
   });

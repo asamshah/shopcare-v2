@@ -12,7 +12,9 @@
  * the draft order (decision.server.ts).
  *
  * A £0 quote (warranty / Care) needs no payment: its draft order is completed
- * straight away (no email), the quote is paid and the repair starts.
+ * straight away (no invoice email), the quote is paid and the ticket moves on
+ * like a paid one: to awaiting_item (postage slip emailed), or to in_repair
+ * when the workshop already has the item.
  *
  * The quotation stays row-locked for the whole send, so a double-submit waits
  * and then finds it already sent. Shopify errors are caught inside the lock,
@@ -33,6 +35,7 @@ import {
   recalculateSubtotal,
   validUntil,
 } from "../../models/quotation.server";
+import { statusAfterPayment } from "../../models/repair-ticket.server";
 import {
   proxyUrl,
   quoteValidDays,
@@ -68,7 +71,11 @@ export interface QuoteActionInput extends ServiceOptions {
   actor: Actor;
 }
 
-export type SendQuoteResult = Result<{ warranty: boolean }>;
+export type SendQuoteResult = Result<{
+  warranty: boolean;
+  /** Where a £0 quote moved the ticket (awaiting_item or in_repair). */
+  ticketStatus?: string;
+}>;
 
 /** Work to run once the lock's transaction has committed. */
 export type AfterCommit = (() => Promise<void>)[];
@@ -209,16 +216,21 @@ async function completeInShopify(
       },
       include: { cover: true },
     });
-    const ticket = await setTicketStatus(tx, quotation.repairTicketId, "in_repair");
+    const next = statusAfterPayment(
+      await tx.repairTicket.findUniqueOrThrow({ where: { id: quotation.repairTicketId } }),
+    );
+    const ticket = await setTicketStatus(tx, quotation.repairTicketId, next);
     const applied = coverApplied(paid) && paid.cover;
     if (applied) await recordClaim(paid.cover!.id, tx);
     const reason = applied ? `Covered by ${coverName(paid.cover!)}:` : "No-charge";
+    const outcome =
+      next === "in_repair" ? "repair started" : "waiting for the customer to send the item";
     await createTicketActivity(
       {
         repairTicketId: quotation.repairTicketId,
         activityType: "quote_sent",
         author: "system",
-        body: `${reason} (${formattedSubtotal(paid)}) quote auto-completed — repair started.`,
+        body: `${reason} (${formattedSubtotal(paid)}) quote auto-completed — ${outcome}.`,
       },
       tx,
     );
@@ -227,7 +239,7 @@ async function completeInShopify(
       after.push(() =>
         notifyRepairStatusChanged(shop, ticket.ticket, { deps: options.notifyDeps }),
       );
-    return { ok: true, warranty: true };
+    return { ok: true, warranty: true, ticketStatus: next };
   } catch (error) {
     return failure(quotation, error, options);
   }

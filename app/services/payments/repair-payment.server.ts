@@ -3,8 +3,9 @@
  * Repairs::PaymentProcessor.
  *
  * Paying a quote's invoice is accepting it: the quote goes from sent to paid
- * in one step (counting the cover's claim), the ticket moves to in_repair,
- * the payment is logged, staff are alerted (quote_paid), the customer's
+ * in one step (counting the cover's claim), the ticket moves to
+ * awaiting_item (the customer is emailed a postage slip) or, when the workshop
+ * already has the item, straight to in_repair; the payment is logged, staff are alerted (quote_paid), the customer's
  * storefront status metafield is synced and the `payment` outbound webhook
  * sent. A payment for a cancelled ticket doesn't reopen it: it's flagged for
  * staff instead.
@@ -16,6 +17,7 @@ import type { Shop } from "@prisma/client";
 import prisma from "../../db.server";
 import { recordClaim } from "../../models/cover.server";
 import { coverApplied } from "../../models/quotation.server";
+import { statusAfterPayment } from "../../models/repair-ticket.server";
 import { repairOrderTag } from "../../models/shop.server";
 import { createTicketActivity } from "../../models/ticket-activity.server";
 import { updateRepairStatus } from "../../shopify/customers.server";
@@ -125,13 +127,14 @@ export async function processRepairPayment(
       );
       return { outcome: "ok" as const, paid, moved: { ticket, changed: false } };
     }
-    const moved = await setTicketStatus(tx, ticket.id, "in_repair");
+    const next = statusAfterPayment(ticket);
+    const moved = await setTicketStatus(tx, ticket.id, next);
     await createTicketActivity(
       {
         repairTicketId: ticket.id,
         activityType: "payment",
         author: "system",
-        body: `${received} Repair started.`,
+        body: `${received} ${next === "in_repair" ? "Repair started." : "Waiting for the customer to send the item."}`,
       },
       tx,
     );

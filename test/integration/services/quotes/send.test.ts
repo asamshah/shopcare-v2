@@ -193,13 +193,23 @@ describe("sendQuote", () => {
   it("auto-completes a £0 quote without an invoice", async () => {
     const quotation = await paidQuote(ticket.id, 0);
     const result = await send(quotation.id);
-    expect(result).toEqual({ ok: true, warranty: true });
+    expect(result).toEqual({ ok: true, warranty: true, ticketStatus: "awaiting_item" });
     const q = await prisma.quotation.findUniqueOrThrow({ where: { id: quotation.id } });
     expect(q.status).toBe("paid");
     expect(q.decisionTokenDigest).toBeNull();
     expect(q.shopifyOrderId).toBe("5001");
-    expect((await prisma.repairTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("in_repair");
+    // The customer still has the item: they're sent a postage slip.
+    expect((await prisma.repairTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("awaiting_item");
     expect(api.kinds()).toEqual(["create", "complete"]);
+  });
+
+  it("a £0 quote for an item the workshop already has starts the repair", async () => {
+    await prisma.repairTicket.update({ where: { id: ticket.id }, data: { itemReceivedAt: new Date() } });
+    const quotation = await paidQuote(ticket.id, 0);
+    expect(await send(quotation.id)).toEqual({ ok: true, warranty: true, ticketStatus: "in_repair" });
+    expect((await prisma.repairTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("in_repair");
+    const activity = await prisma.ticketActivity.findFirstOrThrow({ where: { repairTicketId: ticket.id, activityType: "quote_sent" } });
+    expect(activity.body).toMatch(/repair started\.$/);
   });
 
   it("refuses to send an empty quote", async () => {

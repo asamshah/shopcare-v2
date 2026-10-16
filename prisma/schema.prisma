@@ -489,6 +489,14 @@ model RepairTicket {
   itemId            Int?      @map("item_id")
   coverId           Int?      @map("cover_id")
   costs             Json      @default("{}") @db.JsonB
+  /// When staff marked the customer's parcel as arrived ("Mark received").
+  itemReceivedAt    DateTime? @map("item_received_at")
+  /// The stored postage slip PDF (app/services/repairs/postage-slip.server.ts).
+  postageSlipKey    String?   @map("postage_slip_key")
+  /// sha256 of what the stored slip was drawn from; a change regenerates it.
+  postageSlipDigest String?   @map("postage_slip_digest")
+  /// "Send your item to us" emails queued (1 = the first; resends count up).
+  postageEmailsSent Int       @default(0) @map("postage_emails_sent")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 

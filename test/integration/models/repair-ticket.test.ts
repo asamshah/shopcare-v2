@@ -41,6 +41,8 @@ describe("RepairTicket", () => {
       "assessing",
       "quoted",
       "quote_declined",
+      "awaiting_item",
+      "received",
       "in_repair",
       "ready",
       "completed",

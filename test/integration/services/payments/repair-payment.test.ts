@@ -52,16 +52,18 @@ describe("processRepairPayment", () => {
     outbound = captureEnqueue();
   });
 
-  it("paying the invoice accepts and pays the quote in one step, starts the repair and alerts staff", async () => {
+  it("paying the invoice accepts and pays the quote in one step, asks for the item and alerts staff", async () => {
     shop = await prisma.shop.update({ where: { id: shop.id }, data: { settings: { notifications: { flow: true }, webhook_url: "https://hooks.example/x" } } });
     expect(await run()).toBe("ok");
     const q = await reloadQuote();
     expect([q.status, q.shopifyOrderId, q.decidedBy]).toEqual(["paid", "555", "customer"]);
     expect(q.paidAt).not.toBeNull();
     expect(q.decidedAt).not.toBeNull();
-    expect((await reloadTicket()).status).toBe("in_repair");
+    expect((await reloadTicket()).status).toBe("awaiting_item");
     const payment = await prisma.ticketActivity.findFirstOrThrow({ where: { repairTicketId: ticket.id, activityType: "payment" } });
-    expect(payment.body).toBe("The customer paid the invoice, accepting the quote (order #1042, 24.00 GBP). Repair started.");
+    expect(payment.body).toBe(
+      "The customer paid the invoice, accepting the quote (order #1042, 24.00 GBP). Waiting for the customer to send the item.",
+    );
     const delivery = await prisma.notificationDelivery.findFirstOrThrow({ where: { event: "quote_paid", channel: "flow" } });
     const data = (delivery.payload as { data: Record<string, unknown> }).data;
     expect([data.orderName, data.quoteTotal, data.ticketId]).toEqual(["#1042", "£24.00", ticket.id]);
@@ -101,7 +103,15 @@ describe("processRepairPayment", () => {
     await prisma.repairTicket.update({ where: { id: ticket.id }, data: { status: "quote_declined" } });
     expect(await run()).toBe("ok");
     expect((await reloadQuote()).status).toBe("paid");
+    expect((await reloadTicket()).status).toBe("awaiting_item");
+  });
+
+  it("paying for an item the workshop already has starts the repair", async () => {
+    await prisma.repairTicket.update({ where: { id: ticket.id }, data: { itemReceivedAt: new Date() } });
+    expect(await run()).toBe("ok");
     expect((await reloadTicket()).status).toBe("in_repair");
+    const payment = await prisma.ticketActivity.findFirstOrThrow({ where: { repairTicketId: ticket.id, activityType: "payment" } });
+    expect(payment.body).toMatch(/Repair started\.$/);
   });
 
   it("won't apply a payment to a quote that was never sent", async () => {

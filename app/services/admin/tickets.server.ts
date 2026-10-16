@@ -469,7 +469,7 @@ export async function sendTicketQuote(shop: Shop, ticketId: number): Promise<Out
   if (!result.ok) return { alert: result.error };
   return {
     notice: result.warranty
-      ? "Warranty quote completed — ticket moved to in repair."
+      ? `Warranty quote completed — ticket moved to ${statusText(result.ticketStatus ?? "in_repair")}.`
       : "Quote sent: Shopify emailed the customer its invoice.",
   };
 }

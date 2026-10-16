@@ -2,9 +2,13 @@
  * A repair request and its workbench record. Port of RepairTicket.
  *
  * Status pipeline (docs/MERCHANT-ADMIN-SPEC.md §4):
- *   new → assessing → quoted → in_repair → ready → completed
+ *   new → assessing → quoted → awaiting_item → received → in_repair → ready → completed
  *   quoted → quote_declined (the customer declined, or the quote expired)
+ *   quoted → in_repair when the item was already received (itemReceivedAt)
  *   (+ cancelled / rejected terminal states)
+ *
+ * awaiting_item: the quote is paid (or £0 covered) and the customer has been
+ * sent a postage slip; received: staff marked the parcel as arrived.
  *
  * Rails also emitted `repair_status_changed` after a status change commit
  * (`after_update_commit`). There are no callbacks here: callers that change
@@ -29,6 +33,8 @@ export const REPAIR_TICKET_STATUSES = [
   "assessing",
   "quoted",
   "quote_declined",
+  "awaiting_item",
+  "received",
   "in_repair",
   "ready",
   "completed",
@@ -67,6 +73,17 @@ export async function updateRepairTicket(
   const current = await db.repairTicket.findUniqueOrThrow({ where: { id } });
   assertValid("RepairTicket", validateRepairTicket({ ...current, ...data } as Validatable));
   return db.repairTicket.update({ where: { id }, data });
+}
+
+/**
+ * Where a paid (or £0 covered) quote moves the ticket: straight into repair
+ * when the workshop already has the item, else waiting for the customer to
+ * post it.
+ */
+export function statusAfterPayment(
+  ticket: Pick<RepairTicket, "itemReceivedAt">,
+): Extract<RepairTicketStatus, "awaiting_item" | "in_repair"> {
+  return ticket.itemReceivedAt ? "in_repair" : "awaiting_item";
 }
 
 export function isClosed(ticket: Pick<RepairTicket, "status">): boolean {

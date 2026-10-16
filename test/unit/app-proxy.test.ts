@@ -28,6 +28,8 @@ function deps(overrides: Partial<AppProxyDeps> = {}): AppProxyDeps {
         liquid: vi.fn(),
       }) as never,
     customerSigningKey: async (s) => (s === shop ? key : null),
+    // Unit tests never touch the database (the default writes the Shop row).
+    rememberPathPrefix: async () => {},
     throttleStore: memoryThrottleStore(),
     now: () => now,
     ...overrides,

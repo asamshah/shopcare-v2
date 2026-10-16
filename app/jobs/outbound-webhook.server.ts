@@ -37,9 +37,26 @@ export interface OutboundWebhookDeps {
 
 let configured: OutboundWebhookDeps | undefined;
 
-/** TODO(integration): wire the Prisma loader (Shop settings + RepairTicket + current quotation). */
+/** Overrides the job's dependencies (tests); undefined goes back to the default. */
 export function setOutboundWebhookDeps(deps: OutboundWebhookDeps | undefined) {
   configured = deps;
+}
+
+/**
+ * The job's dependencies: whatever was set, else (outside Vitest) the Prisma
+ * loader in app/services/repairs/outbound-webhook-context.server.ts.
+ */
+async function outboundWebhookDeps(): Promise<OutboundWebhookDeps> {
+  if (configured) return configured;
+  if (process.env.VITEST)
+    throw new Error(
+      "Outbound webhooks aren't wired up in tests: call setOutboundWebhookDeps().",
+    );
+  const { loadOutboundWebhookContext } = await import(
+    "../services/repairs/outbound-webhook-context.server"
+  );
+  configured = { loadContext: (shopId, ticketId) => loadOutboundWebhookContext(shopId, ticketId) };
+  return configured;
 }
 
 export interface OutboundWebhookJobPayload {
@@ -90,10 +107,7 @@ export async function outboundWebhookJob(payload: JobPayload): Promise<void> {
     console.error("[job:outbound-webhook] invalid payload", payload);
     return;
   }
-  if (!configured)
-    throw new Error(
-      "Outbound webhooks aren't wired up yet: call setOutboundWebhookDeps().",
-    );
+  const deps = await outboundWebhookDeps();
   await performOutboundWebhook(
     {
       shopId: String(shopId),
@@ -101,6 +115,6 @@ export async function outboundWebhookJob(payload: JobPayload): Promise<void> {
       event,
       detail: typeof detail === "string" ? detail : null,
     },
-    configured,
+    deps,
   );
 }

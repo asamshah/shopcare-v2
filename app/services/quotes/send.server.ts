@@ -164,13 +164,14 @@ export async function emailInvoice(
   quotationId: number,
   token: string,
   summary: string,
-  { tx, shop, client, actor, options }: SendContext,
+  { tx, shop, client, now, actor, options }: SendContext,
   record?: () => Promise<void>,
 ): Promise<SendQuoteResult> {
   try {
     const draftId = await ensureQuoteDraftOrder(quotationId, client, {
       db: tx,
       shopCurrency: shopCurrencyOf(client),
+      now,
     });
     const quotation = await tx.quotation.findUniqueOrThrow({
       where: { id: quotationId },
@@ -204,6 +205,7 @@ async function completeInShopify(
     const draftId = await ensureQuoteDraftOrder(quotation.id, client, {
       db: tx,
       shopCurrency: shopCurrencyOf(client),
+      now,
     });
     const completed = await completeDraftOrder(client, draftId);
     const paid = await tx.quotation.update({

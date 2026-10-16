@@ -20,6 +20,7 @@ import {
   createQuotationFor,
   createRepairTicketFor,
   createWarrantyPolicyFor,
+  WORKSHOP_SETTINGS,
 } from "../../../support/factories";
 import { FakeDraftOrders } from "../../../support/fake-draft-orders";
 import { captureEnqueue, dbNotifyDeps, paidQuote, quoteShop, sentQuote } from "../../../support/quotes";
@@ -73,6 +74,12 @@ describe("sendQuote", () => {
     expect(api.kinds()).toEqual(["create", "invoice"]);
     const input = api.calls[0][1].input as Record<string, unknown>;
     expect(input.email).toBe("c@example.com");
+    expect(input.tags).toEqual(["repair", "shopcare-repair"]);
+    // No workshop address in Settings: no postage slip link for the order confirmation.
+    expect((input.customAttributes as { key: string }[]).map((a) => a.key)).toEqual([
+      "repair_quotation_id",
+      "repair_ticket_id",
+    ]);
     const [, invoice] = api.calls[1];
     expect(invoice.id).toBe("gid://shopify/DraftOrder/999");
     const email = invoice.email as { subject: string; customMessage: string };
@@ -201,6 +208,21 @@ describe("sendQuote", () => {
     // The customer still has the item: they're sent a postage slip.
     expect((await prisma.repairTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("awaiting_item");
     expect(api.kinds()).toEqual(["create", "complete"]);
+  });
+
+  it("a £0 quote's draft order carries the postage slip link before it's completed (Shopify's order confirmation shows it)", async () => {
+    await prisma.shop.update({ where: { id: shop.id }, data: { settings: { currency: "GBP", ...WORKSHOP_SETTINGS } } });
+    const quotation = await paidQuote(ticket.id, 0);
+    await send(quotation.id, { now: new Date(Date.UTC(2026, 9, 16, 10)) });
+    expect(api.kinds()).toEqual(["create", "complete"]);
+    const input = api.calls[0][1].input as { customAttributes: { key: string; value: string }[] };
+    const attrs = Object.fromEntries(input.customAttributes.map((a) => [a.key, a.value]));
+    expect(attrs.repair_ticket_id).toBe(String(ticket.id));
+    expect(attrs.shopcare_postage_slip_url).toMatch(
+      new RegExp(`^https://qs-test\\.myshopify\\.com/apps/repairs/tickets/${ticket.id}/postage-slip\\?expires=\\d+&token=[0-9a-f]+$`),
+    );
+    expect(attrs.shopcare_workshop_address).toContain("Acme Repairs");
+    expect(attrs.shopcare_posting_instructions).toBe("Use a tracked service.");
   });
 
   it("a £0 quote for an item the workshop already has starts the repair", async () => {

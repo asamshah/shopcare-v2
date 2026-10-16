@@ -21,6 +21,11 @@ import type { Db } from "../../lib/db-lock.server";
 import { coverName } from "../../models/cover.server";
 import { repairOrderTag } from "../../models/shop.server";
 import {
+  orderConfirmationAttributes,
+  REPAIR_ORDER_TAG,
+  type OrderAttribute,
+} from "./order-confirmation.server";
+import {
   createDraftOrder,
   deleteDraftOrder,
   updateDraftOrder,
@@ -49,8 +54,13 @@ export interface QuoteDraftOrderInput {
   ticket: { id: number; customerEmail: string | null };
   /** The cover applied to the quote (named on discounts and the excess). */
   coverName?: string | null;
-  /** Shop.repairOrderTag(). */
+  /** Shop.repairOrderTag(); the order also gets REPAIR_ORDER_TAG. */
   orderTag: string;
+  /**
+   * What the Order confirmation snippet shows (postage slip link, workshop
+   * address, status page; order-confirmation.server.ts).
+   */
+  confirmationAttributes?: OrderAttribute[];
   /** The shop's currency, when the quote has none recorded. */
   shopCurrency: string;
 }
@@ -114,11 +124,12 @@ export function quoteDraftOrderAttributes(
     lineItems: lines,
     currencyCode: quotation.currency || input.shopCurrency,
     email: ticket.customerEmail,
-    tags: input.orderTag,
+    tags: [...new Set([input.orderTag, REPAIR_ORDER_TAG])],
     note: `Repair ticket #${ticket.id}`,
     customAttributes: [
       { key: "repair_quotation_id", value: String(quotation.id) },
       { key: "repair_ticket_id", value: String(ticket.id) },
+      ...(input.confirmationAttributes ?? []),
     ],
     useCustomerDefaultAddress: false,
   };
@@ -128,6 +139,8 @@ export function quoteDraftOrderAttributes(
  * The quotation's draft order id, created the first time. A draft order
  * already recorded on the quote is updated to match the quote as it is now.
  * `shopCurrency` is asked only when the quote has no currency recorded.
+ * `now` dates the signed postage slip link carried for the order
+ * confirmation.
  */
 export async function ensureQuoteDraftOrder(
   quotationId: number,
@@ -135,7 +148,8 @@ export async function ensureQuoteDraftOrder(
   {
     db = prisma,
     shopCurrency,
-  }: { db?: Db; shopCurrency: () => Promise<string> },
+    now = new Date(),
+  }: { db?: Db; shopCurrency: () => Promise<string>; now?: Date },
 ): Promise<string> {
   const quotation = await db.quotation.findUniqueOrThrow({
     where: { id: quotationId },
@@ -152,6 +166,7 @@ export async function ensureQuoteDraftOrder(
     ticket,
     coverName: quotation.cover ? coverName(quotation.cover) : null,
     orderTag: repairOrderTag(ticket.shop),
+    confirmationAttributes: orderConfirmationAttributes(ticket.shop, ticket, now),
     shopCurrency: quotation.currency ?? (await shopCurrency()),
   });
 

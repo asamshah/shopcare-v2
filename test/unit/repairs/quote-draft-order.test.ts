@@ -9,6 +9,11 @@ import {
   quoteDraftOrderLine,
 } from "../../../app/services/repairs/quote-draft-order.server";
 import { draftOrderInput } from "../../../app/shopify/draft-orders.server";
+import {
+  orderConfirmationAttributes,
+  REPAIR_ORDER_TAG,
+} from "../../../app/services/repairs/order-confirmation.server";
+import { verifyPostageSlipLink } from "../../../app/services/repairs/postage-slip.server";
 
 const line = (overrides: Record<string, unknown> = {}) => ({
   title: "Resole",
@@ -67,7 +72,7 @@ describe("quoteDraftOrderAttributes", () => {
     expect(attrs).toEqual({
       currencyCode: "EUR",
       email: "a@example.com",
-      tags: "repair",
+      tags: ["repair", "shopcare-repair"],
       note: "Repair ticket #12",
       customAttributes: [
         { key: "repair_quotation_id", value: "3" },
@@ -92,5 +97,76 @@ describe("quoteDraftOrderAttributes", () => {
     });
     expect(attrs.currencyCode).toBe("GBP");
     expect(attrs.lineItems).toEqual([]);
+  });
+});
+
+describe("order confirmation attributes (read by the Order confirmation snippet)", () => {
+  const workshop = {
+    workshop_address: {
+      name: "Acme Repairs",
+      line1: "4 Cobbler's Yard",
+      line2: "",
+      city: "Northampton",
+      postcode: "NN1 1AA",
+      country: "United Kingdom",
+    },
+    posting_instructions: "Use a tracked service.",
+    quote_valid_days: "14",
+    notifications: { status_url: "https://acme.example/pages/repairs" },
+  };
+  const shop = { shopifyDomain: "acme.myshopify.com", settings: workshop };
+  const now = new Date(Date.UTC(2026, 9, 16, 10));
+
+  it("carries a signed slip link (quote validity + 30 days), the workshop address and instructions", () => {
+    const attrs = orderConfirmationAttributes(shop, { id: 42, itemReceivedAt: null }, now);
+    const byKey = Object.fromEntries(attrs.map((a) => [a.key, a.value]));
+    expect(Object.keys(byKey)).toEqual([
+      "shopcare_status_url",
+      "shopcare_postage_slip_url",
+      "shopcare_workshop_address",
+      "shopcare_posting_instructions",
+    ]);
+    expect(byKey.shopcare_status_url).toBe("https://acme.example/pages/repairs");
+    expect(byKey.shopcare_workshop_address).toBe(
+      "Acme Repairs\n4 Cobbler's Yard\nNorthampton NN1 1AA\nUnited Kingdom",
+    );
+    expect(byKey.shopcare_posting_instructions).toBe("Use a tracked service.");
+    const url = new URL(byKey.shopcare_postage_slip_url);
+    expect(url.origin + url.pathname).toBe("https://acme.myshopify.com/apps/repairs/tickets/42/postage-slip");
+    expect(verifyPostageSlipLink("acme.myshopify.com", 42, url.searchParams, now)).toBe("valid");
+    const day44 = new Date(now.getTime() + 43 * 86_400_000);
+    const day45 = new Date(now.getTime() + 45 * 86_400_000);
+    expect(verifyPostageSlipLink("acme.myshopify.com", 42, url.searchParams, day44)).toBe("valid");
+    expect(verifyPostageSlipLink("acme.myshopify.com", 42, url.searchParams, day45)).toBe("expired");
+  });
+
+  it("says the item is already here instead of posting details", () => {
+    expect(orderConfirmationAttributes(shop, { id: 42, itemReceivedAt: now }, now)).toEqual([
+      { key: "shopcare_status_url", value: "https://acme.example/pages/repairs" },
+      { key: "shopcare_item_received", value: "yes" },
+    ]);
+  });
+
+  it("has no slip link without a complete workshop address", () => {
+    expect(
+      orderConfirmationAttributes({ shopifyDomain: "acme.myshopify.com", settings: {} }, { id: 42, itemReceivedAt: null }, now),
+    ).toEqual([]);
+  });
+
+  it("go onto the draft order after the quotation and ticket ids, and the order is tagged", () => {
+    const attrs = quoteDraftOrderAttributes({
+      quotation: { id: 3, currency: "GBP", coverExcess: 0 },
+      lineItems: [],
+      ticket: { id: 42, customerEmail: null },
+      orderTag: "shopcare-repair",
+      shopCurrency: "GBP",
+      confirmationAttributes: [{ key: "shopcare_item_received", value: "yes" }],
+    });
+    expect(attrs.tags).toEqual([REPAIR_ORDER_TAG]);
+    expect(attrs.customAttributes).toEqual([
+      { key: "repair_quotation_id", value: "3" },
+      { key: "repair_ticket_id", value: "42" },
+      { key: "shopcare_item_received", value: "yes" },
+    ]);
   });
 });

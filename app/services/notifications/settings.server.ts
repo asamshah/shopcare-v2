@@ -1,11 +1,8 @@
 /**
  * Per-shop notification settings, as the notifications service needs them.
  *
- * TODO(integration): load this from the Shop row (see the Settings section of
- * "Notifications (v2 design)" in docs/PORTING.md). The loader decides defaults
- * that depend on the database, such as `flowEnabled` for shops migrated from
- * Rails (where Flow was on unless switched off) and `supportEmail` falling
- * back to `shop { contactEmail }`.
+ * Loaded from the Shop row by loadNotificationSettings()
+ * (shop-settings.server.ts). Flow is off unless the merchant turns it on.
  */
 import { EMAIL_KINDS, type EmailKind } from "./events.server";
 
@@ -40,6 +37,11 @@ export interface ShopNotificationSettings {
   /** Optional integrations. */
   flowEnabled: boolean;
   klaviyoApiKey?: string | null;
+  /**
+   * Days after purchase the marketing "Add Care" offer is emitted (by the
+   * daily care-offers job, consent checked at send). Default 7.
+   */
+  careOfferDelayDays?: number;
 }
 
 const OFF_BY_DEFAULT: readonly EmailKind[] = ["care_offer"];

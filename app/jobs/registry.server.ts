@@ -13,6 +13,8 @@
  * once. Domain jobs (Rails app/jobs/*) are added here as they're ported, see
  * docs/PORTING.md.
  */
+import { careOffersJob } from "./care-offers.server";
+import { dailyPruneJob } from "./daily-prune.server";
 import { exampleJob } from "./example.server";
 import { notificationJob } from "./notification.server";
 import { outboundWebhookJob } from "./outbound-webhook.server";
@@ -22,6 +24,8 @@ export type JobPayload = Record<string, unknown>;
 export type JobHandler = (payload: JobPayload) => Promise<void>;
 
 export const jobs = {
+  "care-offers": careOffersJob,
+  "daily-prune": dailyPruneJob,
   example: exampleJob,
   notification: notificationJob,
   "outbound-webhook": outboundWebhookJob,

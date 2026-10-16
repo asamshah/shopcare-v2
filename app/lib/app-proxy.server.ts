@@ -13,11 +13,16 @@
  *
  * Writing a route: see `proxyRoute` below and app/routes/proxy.ping.tsx.
  */
+import prisma from "../db.server";
+import {
+  customerSigningKeyFor,
+  rememberProxyPathPrefix,
+} from "../models/shop.server";
 import { authenticate } from "../shopify.server";
 import { verifiedCustomerId } from "./customer-token.server";
 import { jsonResponse, liquidResponse, type CachePolicy } from "./http.server";
 import {
-  memoryThrottleStore,
+  defaultThrottleStore,
   throttle,
   type ThrottleLimits,
   type ThrottleStore,
@@ -47,17 +52,17 @@ export interface AppProxyDeps {
 }
 
 /**
- * Defaults until the Shop model lands. TODO(integration):
- *   customerSigningKey → the decrypted `Shop.customerSigningKey`
- *   rememberPathPrefix → update `Shop.settings.proxy_path_prefix`
- *   throttleStore      → postgresThrottleStore(prisma), once proxy_throttles exists
- * Until then no signed customer token verifies (fail closed:
- * logged_in_customer_id still works) and throttle counts are per instance.
+ * Production wiring:
+ *   customerSigningKey → the shop's decrypted `customerSigningKey` (Shop row)
+ *   rememberPathPrefix → `Shop.settings.proxy_path_prefix`, written on change
+ *   throttleStore      → Postgres (`proxy_throttles`); in memory under Vitest
  */
 const defaults: AppProxyDeps = {
   authenticate: (request) => authenticate.public.appProxy(request),
-  customerSigningKey: async () => null,
-  throttleStore: memoryThrottleStore(),
+  customerSigningKey: (shop) => customerSigningKeyFor(shop, prisma),
+  rememberPathPrefix: (shop, prefix) =>
+    rememberProxyPathPrefix(shop, prefix, prisma),
+  throttleStore: defaultThrottleStore(),
   now: () => new Date(),
 };
 

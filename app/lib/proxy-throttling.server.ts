@@ -3,12 +3,13 @@
  * `ProxyThrottling`). Two counters per window: one per shop + visitor IP, and
  * a ceiling per shop. Once either passes its limit the request gets a 429.
  *
- * Netlify Function instances share no memory, so production counts in
- * Postgres (`postgresThrottleStore`, table `proxy_throttles`, SQL in
- * prisma/pending/proxy_throttles.sql). `memoryThrottleStore` is for tests and
- * local dev only: on Netlify it would count per instance.
+ * Netlify Function instances share no memory, so outside tests the counts are
+ * in Postgres (`postgresThrottleStore`, table `proxy_throttles`, pruned daily
+ * by netlify/functions/daily-prune.mts). `memoryThrottleStore` is for unit
+ * tests only: on Netlify it would count per instance.
  */
 import type { PrismaClient } from "@prisma/client";
+import prisma from "../db.server";
 
 export interface ThrottleStore {
   /**
@@ -80,6 +81,14 @@ export function postgresThrottleStore(
     },
   };
 }
+
+/** Postgres everywhere except under Vitest. */
+export function defaultThrottleStore(): ThrottleStore {
+  return process.env.VITEST ? memoryThrottleStore() : postgresThrottleStore(prisma);
+}
+
+/** Throttle rows older than this are pruned (no window is longer than a day). */
+export const THROTTLE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export interface ThrottleLimits {
   /** Endpoint name, part of the counter key (e.g. "catalog", "order_lookup"). */

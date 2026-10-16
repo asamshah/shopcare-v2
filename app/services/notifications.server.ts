@@ -21,7 +21,8 @@
  *                        is marked failed.
  *
  * Dependencies are passed in (store, settings loader, consent checker, Admin
- * GraphQL client), so everything here runs in tests without a database.
+ * GraphQL client), so everything here runs in tests without a database; the
+ * job uses the production wiring by default (getNotificationDeps).
  */
 import {
   EmailDeliveryError,
@@ -41,6 +42,7 @@ import {
 import type { AdminGraphqlClient } from "../shopify/graphql.server";
 import { FlowClient } from "./notifications/flow-client.server";
 import { KlaviyoClient } from "./notifications/klaviyo-client.server";
+import { productionNotificationDeps } from "./notifications/production-deps.server";
 import {
   isEmailEnabled,
   type ShopNotificationSettings,
@@ -89,23 +91,27 @@ export interface NotificationDeps {
 let configured: NotificationDeps | undefined;
 
 /**
- * Sets the dependencies the "notification" job uses.
- *
- * TODO(integration): call this at startup with the Prisma NotificationStore,
- * a settings loader reading the Shop row, `shopifyMarketingConsent()` /
- * Admin clients from `unauthenticated.admin(shop)`, and the unsubscribe route's
- * URL builder.
+ * Overrides the dependencies the "notification" job uses (tests). undefined
+ * goes back to the default.
  */
 export function setNotificationDeps(deps: NotificationDeps | undefined) {
   configured = deps;
 }
 
+/**
+ * The job's dependencies: whatever setNotificationDeps() set, else the
+ * production wiring (Prisma store, Shop-row settings, Shopify consent and
+ * clients; notifications/production-deps.server.ts). Under Vitest there is no
+ * default, so a test can't send through the real database by accident.
+ */
 export function getNotificationDeps(): NotificationDeps {
-  if (!configured) {
+  if (configured) return configured;
+  if (process.env.VITEST) {
     throw new Error(
-      "Notifications aren't wired up yet: call setNotificationDeps() (Prisma store pending).",
+      "Notifications aren't wired up in tests: call setNotificationDeps().",
     );
   }
+  configured = productionNotificationDeps();
   return configured;
 }
 

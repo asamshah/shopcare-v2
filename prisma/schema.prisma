@@ -235,7 +235,7 @@ model NotificationDelivery {
   id                Int      @id @default(autoincrement())
   shopId            Int      @map("shop_id")
   event             String
-  /// "flow" | "klaviyo" | "email"
+  /// "email" | "staff_email" | "flow" | "klaviyo"
   channel           String
   /// "pending" | "sent" | "skipped" | "failed"
   status            String   @default("pending")
@@ -698,4 +698,34 @@ model WarrantyPolicy {
   @@index([productGroupId], map: "index_warranty_policies_on_product_group_id")
   @@index([shopId], map: "index_warranty_policies_on_shop_id")
   @@map("warranty_policies")
+}
+
+// ---------------------------------------------------------------------------
+// v2 infrastructure tables (no Rails counterpart: Rails kept these in
+// Rails.cache). Both are pruned daily by netlify/functions/daily-prune.mts.
+// ---------------------------------------------------------------------------
+
+/// Fixed-window counters for App Proxy throttling
+/// (app/lib/proxy-throttling.server.ts, postgresThrottleStore). One row per
+/// endpoint + shop + scope, reset in place each window.
+model ProxyThrottle {
+  /// "<endpoint>/<shop domain>/ip:<ip>" or "<endpoint>/<shop domain>/shop"
+  key         String   @id
+  windowStart DateTime @map("window_start") @db.Timestamptz(6)
+  count       Int
+
+  @@index([windowStart])
+  @@map("proxy_throttles")
+}
+
+/// Shared TTL cache for Shopify reads (product facts, catalogue search,
+/// repair products): app/lib/postgres-cache.server.ts. Shared by every
+/// function instance; expired rows are ignored on read and pruned daily.
+model CacheEntry {
+  key       String   @id
+  value     Json     @db.JsonB
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("cache_entries")
 }

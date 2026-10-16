@@ -2,13 +2,15 @@
  * A small TTL cache for Shopify reads that Rails kept in `Rails.cache`
  * (product facts, catalogue search, repair products).
  *
- * Netlify function instances share nothing, so the default is per instance:
- * it saves repeat calls within one warm instance (e.g. recording an order that
- * asks about the same product several times) and nothing more. Callers that
- * need a shared cache can pass any `ShopifyCache` (Postgres, Netlify Blobs).
- * Failures are never cached: only values a loader returns are stored, and
- * `null` is skipped like Rails' `skip_nil: true`.
+ * Netlify function instances share nothing, so outside tests the default is
+ * the Postgres-backed `PostgresCache` (app/lib/postgres-cache.server.ts,
+ * table `cache_entries`), shared by every instance. Under Vitest it's an
+ * in-memory `MemoryCache`, so unit tests need no database. Callers can still
+ * pass any `ShopifyCache`. Failures are never cached: only values a loader
+ * returns are stored, and `null` is skipped like Rails' `skip_nil: true`.
  */
+import prisma from "../db.server";
+import { PostgresCache } from "../lib/postgres-cache.server";
 
 export interface ShopifyCache {
   get<T>(key: string): Promise<T | undefined> | T | undefined;
@@ -49,8 +51,24 @@ export class MemoryCache implements ShopifyCache {
   }
 }
 
-/** Shared by default within one function instance. */
-export const defaultShopifyCache = new MemoryCache();
+let shared: ShopifyCache | undefined;
+
+function sharedCache(): ShopifyCache {
+  return (shared ??= process.env.VITEST
+    ? new MemoryCache()
+    : new PostgresCache(prisma));
+}
+
+/** Replace the shared cache (tests); undefined goes back to the default. */
+export function setDefaultShopifyCache(cache: ShopifyCache | undefined): void {
+  shared = cache;
+}
+
+/** The cache used when a caller passes none (see the top of this file). */
+export const defaultShopifyCache: ShopifyCache = {
+  get: (key) => sharedCache().get(key),
+  set: (key, value, ttlMs) => sharedCache().set(key, value, ttlMs),
+};
 
 /** Returns the cached value, or loads, stores (unless null) and returns it. */
 export async function cached<T>(

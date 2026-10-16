@@ -31,9 +31,9 @@ export type ShopSecret = keyof typeof SHOP_SECRETS;
 const secretContext = (field: ShopSecret) => `Shop.${field}`;
 
 /** The decrypted secret, or null when none is stored. */
-export function shopSecret(
-  shop: Pick<Shop, (typeof SHOP_SECRETS)[ShopSecret]>,
-  field: ShopSecret,
+export function shopSecret<F extends ShopSecret>(
+  shop: Pick<Shop, (typeof SHOP_SECRETS)[F]>,
+  field: F,
 ): string | null {
   const ciphertext = shop[SHOP_SECRETS[field]];
   return ciphertext ? decrypt(ciphertext, secretContext(field)) : null;
@@ -54,6 +54,59 @@ export function setShopSecret(
   db: Db = prisma,
 ): Promise<Shop> {
   return db.shop.update({ where: { id: shopId }, data: shopSecretData(field, value) });
+}
+
+// --- Customer signing key (Shopify::CustomerSigningKey) ----------------------
+
+/**
+ * The state `ensureCustomerSigningKey` (app/shopify/customer-signing-key.server.ts)
+ * starts from: the decrypted key and when it was last published (Rails kept
+ * that in settings["customer_signing_key_published_at"]).
+ */
+export function customerSigningKeyState(
+  shop: Pick<Shop, "settings" | "customerSigningKeyCiphertext">,
+): { key: string | null; publishedAt: string | null } {
+  const publishedAt = settingsOf(shop).customer_signing_key_published_at;
+  return {
+    key: shopSecret(shop, "customerSigningKey"),
+    publishedAt: typeof publishedAt === "string" && publishedAt ? publishedAt : null,
+  };
+}
+
+/**
+ * The `save` callback for ensure/rotateCustomerSigningKey: writes the key to
+ * the encrypted column and the publish time to settings, re-reading settings
+ * so a concurrent settings change isn't lost.
+ */
+export function saveCustomerSigningKey(shopId: number, db: Db = prisma) {
+  return async (state: { key: string | null; publishedAt: string | null }) => {
+    const shop = await db.shop.findUniqueOrThrow({ where: { id: shopId } });
+    const settings = { ...settingsOf(shop) };
+    if (state.publishedAt) settings.customer_signing_key_published_at = state.publishedAt;
+    else delete settings.customer_signing_key_published_at;
+    await db.shop.update({
+      where: { id: shopId },
+      data: {
+        ...shopSecretData("customerSigningKey", state.key),
+        settings: settings as Prisma.InputJsonValue,
+      },
+    });
+  };
+}
+
+/**
+ * The decrypted customer signing key for a shop domain, or null (no shop row,
+ * or no key yet). The App Proxy's `customerSigningKey` lookup.
+ */
+export async function customerSigningKeyFor(
+  shopifyDomain: string,
+  db: Db = prisma,
+): Promise<string | null> {
+  const shop = await db.shop.findUnique({
+    where: { shopifyDomain },
+    select: { customerSigningKeyCiphertext: true },
+  });
+  return shop ? shopSecret(shop, "customerSigningKey") : null;
 }
 
 // --- Settings -----------------------------------------------------------------
@@ -93,8 +146,29 @@ export function careSettings(shop: Pick<Shop, "settings">): Record<string, unkno
   };
 }
 
+/**
+ * Notification settings (settings.notifications). Flow is an optional
+ * integration in v2 and OFF unless the merchant turns it on (Rails defaulted
+ * it on; no shops are migrated). `care_offer_delay_days`: how many days after
+ * purchase the "Add Care" offer goes out (see careOfferDelayDays).
+ */
 export function notificationsSettings(shop: Pick<Shop, "settings">): Record<string, unknown> {
-  return { flow: true, ...jsonObject(settingsOf(shop).notifications as Prisma.JsonValue) };
+  return {
+    flow: false,
+    care_offer_delay_days: DEFAULT_CARE_OFFER_DELAY_DAYS,
+    ...jsonObject(settingsOf(shop).notifications as Prisma.JsonValue),
+  };
+}
+
+export const DEFAULT_CARE_OFFER_DELAY_DAYS = 7;
+
+/**
+ * Days after purchase the "Add Care to your purchase" offer is emitted by the
+ * daily care-offers job (netlify/functions/daily-care-offers.mts).
+ */
+export function careOfferDelayDays(shop: Pick<Shop, "settings">): number {
+  const days = parseInt(String(notificationsSettings(shop).care_offer_delay_days ?? ""), 10);
+  return days > 0 ? days : DEFAULT_CARE_OFFER_DELAY_DAYS;
 }
 
 /**
@@ -167,6 +241,24 @@ export function quoteValidDays(shop: Pick<Shop, "settings">): number {
 export function proxyPathPrefix(shop: Pick<Shop, "settings">): string {
   const prefix = settingsOf(shop).proxy_path_prefix;
   return typeof prefix === "string" && prefix.trim() ? prefix : DEFAULT_PROXY_PATH_PREFIX;
+}
+
+/**
+ * Remembers a merchant-customised App Proxy path (Rails
+ * `remember_path_prefix`): writes settings.proxy_path_prefix only when it
+ * changed. No-op for a shop without a row.
+ */
+export async function rememberProxyPathPrefix(
+  shopifyDomain: string,
+  prefix: string,
+  db: Db = prisma,
+): Promise<void> {
+  const shop = await db.shop.findUnique({ where: { shopifyDomain } });
+  if (!shop || proxyPathPrefix(shop) === prefix) return;
+  await db.shop.update({
+    where: { id: shop.id },
+    data: { settings: { ...settingsOf(shop), proxy_path_prefix: prefix } as Prisma.InputJsonValue },
+  });
 }
 
 /** The storefront URL of an App Proxy page, e.g. a quote's review page. */

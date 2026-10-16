@@ -1,10 +1,8 @@
 /**
- * postgresThrottleStore against real Postgres. The proxy_throttles table is
- * pending (prisma/pending/proxy_throttles.sql), so this file creates it from
- * that SQL when the migrations haven't, and drops only what it created.
+ * postgresThrottleStore against real Postgres (table proxy_throttles, from
+ * the 20261016165420_proxy_throttles_and_cache migration).
  */
-import { readFileSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import prisma from "../../app/db.server";
 import {
   postgresThrottleStore,
@@ -12,29 +10,6 @@ import {
   throttleKey,
   windowStartFor,
 } from "../../app/lib/proxy-throttling.server";
-
-let created = false;
-
-beforeAll(async () => {
-  const [{ exists }] = await prisma.$queryRaw<{ exists: boolean }[]>`
-    SELECT to_regclass('proxy_throttles') IS NOT NULL AS exists`;
-  if (exists) return;
-  const sql = readFileSync("prisma/pending/proxy_throttles.sql", "utf8")
-    .split("\n")
-    .filter((line) => !line.startsWith("--"))
-    .join("\n");
-  for (const statement of sql
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean)) {
-    await prisma.$executeRawUnsafe(statement);
-  }
-  created = true;
-});
-
-afterAll(async () => {
-  if (created) await prisma.$executeRawUnsafe(`DROP TABLE proxy_throttles`);
-});
 
 const store = () => postgresThrottleStore(prisma);
 const w1 = new Date("2026-10-16T12:00:00Z");

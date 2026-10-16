@@ -292,6 +292,55 @@ export function proxyUrl(shop: Pick<Shop, "shopifyDomain" | "settings">, path: s
   return `https://${shop.shopifyDomain}${proxyPathPrefix(shop)}/${path}`;
 }
 
+// --- Postage slips: where customers post their items -----------------------
+
+/** Settings → Repairs → Workshop address (settings.workshop_address). */
+export interface WorkshopAddress {
+  name: string;
+  line1: string;
+  line2: string;
+  city: string;
+  postcode: string;
+  country: string;
+}
+
+export const WORKSHOP_ADDRESS_FIELDS = ["name", "line1", "line2", "city", "postcode", "country"] as const;
+/** Everything but the second address line is needed before slips can be made. */
+export const REQUIRED_WORKSHOP_FIELDS = ["name", "line1", "city", "postcode", "country"] as const;
+
+export const DEFAULT_POSTING_INSTRUCTIONS =
+  "Pack your item securely and use a tracked service. Put the packing slip inside the parcel.";
+
+export function workshopAddress(shop: Pick<Shop, "settings">): WorkshopAddress {
+  const stored = jsonObject(settingsOf(shop).workshop_address as Prisma.JsonValue);
+  return Object.fromEntries(
+    WORKSHOP_ADDRESS_FIELDS.map((key) => [key, typeof stored[key] === "string" ? String(stored[key]).trim() : ""]),
+  ) as unknown as WorkshopAddress;
+}
+
+/** The workshop address, or null until every required field is filled in. */
+export function completeWorkshopAddress(shop: Pick<Shop, "settings">): WorkshopAddress | null {
+  const address = workshopAddress(shop);
+  return REQUIRED_WORKSHOP_FIELDS.every((key) => address[key]) ? address : null;
+}
+
+/** Address lines for a label: name, street, town and postcode, country. */
+export function workshopAddressLines(address: WorkshopAddress): string[] {
+  return [
+    address.name,
+    address.line1,
+    address.line2,
+    [address.city, address.postcode].filter(Boolean).join(" "),
+    address.country,
+  ].filter((line) => line.trim());
+}
+
+/** Settings → Repairs → Posting instructions, printed on the slip and in the email. */
+export function postingInstructions(shop: Pick<Shop, "settings">): string {
+  const value = settingsOf(shop).posting_instructions;
+  return typeof value === "string" && value.trim() ? value.trim() : DEFAULT_POSTING_INSTRUCTIONS;
+}
+
 /** Show the first-run setup on the admin home until it's finished or skipped. */
 export function needsSetup(shop: Pick<Shop, "setupCompletedAt">): boolean {
   return shop.setupCompletedAt === null;

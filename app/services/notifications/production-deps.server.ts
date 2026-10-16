@@ -10,6 +10,7 @@
  *                            marketing "Add Care" email)
  *   isSuppressed             the `email_suppressions` list (unsubscribes,
  *                            Resend bounces and complaints)
+ *   attachments              the postage slip PDF for "Send your item to us"
  */
 import prisma from "../../db.server";
 import type { AdminGraphqlClient } from "../../shopify/graphql.server";
@@ -19,6 +20,7 @@ import { PrismaNotificationStore } from "./prisma-store.server";
 import { loadNotificationSettings } from "./shop-settings.server";
 import { isEmailSuppressed } from "./suppressions.server";
 import { unsubscribeUrl } from "./unsubscribe.server";
+import { postageSlipAttachments } from "../repairs/postage-slip.server";
 
 async function adminClient(shopDomain: string): Promise<AdminGraphqlClient> {
   // Imported lazily: client.server loads the Shopify app config.
@@ -37,5 +39,6 @@ export function productionNotificationDeps(): NotificationDeps {
       unsubscribeUrl(shopDomain, recipient),
     isSuppressed: (shopDomain, email, options) =>
       isEmailSuppressed(shopDomain, email, options, prisma),
+    attachments: (delivery) => postageSlipAttachments(delivery),
   };
 }

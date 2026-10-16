@@ -346,3 +346,19 @@ export async function buildWorkshop(shop: Shop) {
   await createServiceComponent({ repairServiceId: service.id, partId: glue.id, quantity: 30 });
   return { sole, glue, service };
 }
+
+// --- Postage slips ---------------------------------------------------------------
+
+/** Settings → Repairs with a complete workshop address (postage slips can be made). */
+export const WORKSHOP_SETTINGS = {
+  workshop_address: {
+    name: "Acme Repairs",
+    line1: "4 Cobbler's Yard",
+    line2: "",
+    city: "Northampton",
+    postcode: "NN1 1AA",
+    country: "United Kingdom",
+  },
+  posting_instructions: "Use a tracked service.",
+  shop_name: "Acme Boots",
+};

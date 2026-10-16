@@ -12,6 +12,10 @@
  *     parts out of stock and records its costs (consumeTicketParts)
  *   - on "cancelled", cancels the ticket's open quote and deletes its draft
  *     order (cancelOpenQuotesForTicket)
+ *   - on "awaiting_item", emails the customer their postage slip (once per
+ *     ticket; requestItemByPost, from notifyRepairStatusChanged)
+ *   - on "received", records when the item arrived and sends "We've
+ *     received your item" (markItemReceived does the same from any status)
  *
  * The status is written under the ticket's row lock, so two staff changing it
  * at once each see the other's result.
@@ -22,6 +26,7 @@
 import type { RepairTicket, Shop } from "@prisma/client";
 import prisma from "../../db.server";
 import {
+  CLOSED_STATUSES,
   REPAIR_TICKET_STATUSES,
   repairStatusChangedEvent,
   type RepairTicketStatus,
@@ -32,6 +37,7 @@ import type { RepairStatus } from "../notifications/events.server";
 import { notify, type NotifyOptions } from "../notifications/notify.server";
 import { consumeTicketParts } from "../parts/consumer.server";
 import { cancelOpenQuotesForTicket } from "../quotes/cancel.server";
+import { notifyItemReceived, requestItemByPost } from "./item-postage.server";
 import {
   authorFor,
   clientFor,
@@ -42,15 +48,25 @@ import {
   type ServiceOptions,
 } from "../quotes/common.server";
 
-/** Rails after_update_commit: tell the customer their repair moved along. */
+/**
+ * Rails after_update_commit: tell the customer their repair moved along, and
+ * on awaiting_item send them the postage slip.
+ */
 export async function notifyRepairStatusChanged(
-  shop: Pick<Shop, "shopifyDomain" | "settings">,
+  shop: Pick<Shop, "id" | "shopifyDomain" | "settings">,
   ticket: Pick<
     RepairTicket,
     "id" | "shopifyCustomerId" | "customerEmail" | "customerName" | "status" | "productTitle"
   >,
   options?: NotifyOptions,
 ): Promise<void> {
+  if (ticket.status === "awaiting_item") {
+    try {
+      await requestItemByPost(shop, ticket, options);
+    } catch (error) {
+      (options?.logger ?? console).error(`[ticket-status] postage email for ticket=${ticket.id} failed`, error);
+    }
+  }
   if (!repairStatusChangedEvent(ticket)) return;
   await notify(
     shop.shopifyDomain,
@@ -109,10 +125,14 @@ export async function changeTicketStatus({
   const outcome = await withLock(db, "repair_tickets", ticketId, async (tx) => {
     const ticket = await tx.repairTicket.findUniqueOrThrow({ where: { id: ticketId } });
     const from = ticket.status;
-    if (from === to) return { ticket, from, changed: false };
+    if (from === to) return { ticket, from, changed: false, received: false };
+    const received = to === "received" && !ticket.itemReceivedAt;
     const updated = await tx.repairTicket.update({
       where: { id: ticketId },
-      data: { status: to as RepairTicketStatus },
+      data: {
+        status: to as RepairTicketStatus,
+        ...(received ? { itemReceivedAt: options.now ?? new Date() } : {}),
+      },
     });
     const extra = note?.trim() ? ` ${note.trim()}` : "";
     await createTicketActivity(
@@ -124,7 +144,7 @@ export async function changeTicketStatus({
       },
       tx,
     );
-    return { ticket: updated, from, changed: true };
+    return { ticket: updated, from, changed: true, received };
   });
 
   if (!outcome.changed) return { ok: true, changed: false, message: "" };
@@ -134,6 +154,8 @@ export async function changeTicketStatus({
     db,
     deps: options.notifyDeps,
   });
+  if (outcome.received)
+    await notifyItemReceived(shop, outcome.ticket, { db, deps: options.notifyDeps });
 
   let message = `Status updated to ${humanStatus(to)}.`;
   if (to === "completed" && partsEnabled(shop)) {
@@ -163,4 +185,58 @@ export async function changeTicketStatus({
     if (cancelled.ok && cancelled.note) message += ` ${cancelled.note}`;
   }
   return { ok: true, changed: true, message };
+}
+
+export interface MarkReceivedInput extends ServiceOptions {
+  shopId: number;
+  ticketId: number;
+  actor: Actor;
+}
+
+/**
+ * Staff "Mark received": the customer's parcel has arrived. A ticket
+ * awaiting its item moves to received (status change, webhook, Flow); one
+ * that arrived before it was quoted (new / assessing / quoted) keeps its
+ * status, so a later payment goes straight to in_repair. Either way the
+ * arrival is logged and the customer gets "We've received your item".
+ */
+export async function markItemReceived({
+  shopId,
+  ticketId,
+  actor,
+  db = prisma,
+  ...options
+}: MarkReceivedInput): Promise<Result<{ message: string }>> {
+  const found = await db.repairTicket.findFirst({ where: { id: ticketId, shopId }, include: { shop: true } });
+  if (!found) return { ok: false, error: "Ticket not found." };
+  if (found.itemReceivedAt) return { ok: false, error: "This item is already marked as received." };
+  if (CLOSED_STATUSES.includes(found.status as RepairTicketStatus))
+    return { ok: false, error: `This ticket is ${found.status}.` };
+
+  if (found.status === "awaiting_item") {
+    const result = await changeTicketStatus({ shopId, ticketId, to: "received", actor, db, ...options });
+    return result.ok ? { ok: true, message: "Item marked as received. The customer has been told." } : result;
+  }
+
+  const marked = await withLock(db, "repair_tickets", ticketId, async (tx) => {
+    const ticket = await tx.repairTicket.findUniqueOrThrow({ where: { id: ticketId } });
+    if (ticket.itemReceivedAt) return null;
+    const updated = await tx.repairTicket.update({
+      where: { id: ticketId },
+      data: { itemReceivedAt: options.now ?? new Date() },
+    });
+    await createTicketActivity(
+      {
+        repairTicketId: ticketId,
+        activityType: "system",
+        author: authorFor(actor),
+        body: "Item received at the workshop.",
+      },
+      tx,
+    );
+    return updated;
+  });
+  if (!marked) return { ok: false, error: "This item is already marked as received." };
+  await notifyItemReceived(found.shop, marked, { db, deps: options.notifyDeps });
+  return { ok: true, message: "Item marked as received. The customer has been told." };
 }

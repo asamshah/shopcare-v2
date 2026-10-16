@@ -224,6 +224,10 @@ ticketing tool. Care plans earn the merchant money, so ShopCare earns with them.
   still need support.
 - Why higher than before: the market is small (hundreds of realistic customers, not
   thousands), so each merchant has to pay more; target brands charge £95–220 per repair.
+- Care is available on every plan, Starter included: the merchant pays the plan fee plus the
+  Care revenue share. Care repairs count towards the plan's repair limit, so merchants who sell
+  a lot of Care move up to Growth naturally. A monthly cap on the revenue share (e.g. $500) is
+  still to decide; Shopify usage billing needs a cap anyway.
 
 **Still to validate:** in the brand calls, ask what running repairs costs them today (staff
 hours, Odoo or spreadsheets, tools) and what they'd pay, and whether they'd accept a revenue
@@ -283,4 +287,5 @@ share on Care. A partner price for brands referred by a repair workshop is also 
 | 16-10-2026 | **Rewrite from Rails to TypeScript on Netlify** (Shopify's React Router template, Prisma + Postgres on Neon, Netlify Functions / Scheduled / Background functions, Netlify Blobs). The Rails app is frozen at tag `rails-reference` as the spec |
 | 16-10-2026 | **ShopCare sends its own emails** (Resend by default): repair received and status updates, Care welcome and credit codes to customers (guests included); staff alerts to one address. The "Add Care" offer is marketing, sent only with Shopify email marketing consent. Flow triggers and Klaviyo become optional extras. Supersedes the 15-10 "ShopCare sends no email itself" |
 | 16-10-2026 | **Pricing proposal** (§6): Starter ~$49 / Growth ~$149 / Pro ~$299 plus 5–10% of Care plan sales; no free plan, 14-day trial. To validate in brand calls; billing not built yet |
+| 16-10-2026 | Care plans available on all ShopCare plans (Starter included); Care repairs count towards the repair limit |
 | 15-10-2026 | Parts are planned from the quote's services (re-planning keeps hand-added parts) and taken from stock when the ticket moves to **completed**; the ticket stores parts + labour cost and margin (labour rate in Settings) |

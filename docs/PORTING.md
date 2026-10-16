@@ -463,11 +463,11 @@ the model layer.
 | `app/services/shopify/customer_token.rb` | app/lib/customer-token.server.ts | done | the single copy (exact `secure_compare` semantics); takes the decrypted key; the App Proxy looks it up on the Shop row (`customerSigningKeyFor`) |
 | `app/services/shopify/discount_codes.rb` | app/shopify/discount-codes.server.ts | done |  |
 | `app/services/shopify/gid.rb` | app/lib/gid.ts | done | `numericId` / `buildGid` / `numericIdOrNull`; ids are strings |
-| `app/services/trade-ins/credit_issuer.rb` | app/services/trade-ins/credit-issuer.server.ts | done | `issueTradeInCredit` → `{ method, reference }`; currency = trade-in's, else the shop's (passed in; Rails fell back to GBP) |
-| `app/services/trade-ins/order_linker.rb` | app/services/trade-ins/order-linker.server.ts | done | `linkTradeInsToOrder`; status notice `notifyTradeInStatus` (notify-status.server.ts) for the workflow to reuse |
-| `app/services/trade-ins/quoter.rb` | app/services/trade-ins/quoter.server.ts | todo |  |
-| `app/services/trade-ins/submission.rb` | app/services/trade-ins/submission.server.ts | todo |  |
-| `app/services/trade-ins/workflow.rb` | app/services/trade-ins/workflow.server.ts | todo |  |
+| `app/services/trade_ins/credit_issuer.rb` | app/services/trade-ins/credit-issuer.server.ts | done | `issueTradeInCredit` → `{ method, reference }`; currency = trade-in's, else the shop's (passed in; Rails fell back to GBP) |
+| `app/services/trade_ins/order_linker.rb` | app/services/trade-ins/order-linker.server.ts | done | `linkTradeInsToOrder`; status notice `notifyTradeInStatus` (notify-status.server.ts) for the workflow to reuse |
+| `app/services/trade_ins/quoter.rb` | app/services/trade-ins/quoter.server.ts | todo |  |
+| `app/services/trade_ins/submission.rb` | app/services/trade-ins/submission.server.ts | todo |  |
+| `app/services/trade_ins/workflow.rb` | app/services/trade-ins/workflow.server.ts | todo |  |
 | `app/services/warranty/cover_assigner.rb` | app/services/warranty/cover-assigner.server.ts | done | `CoverAssigner.factsFor` (outside the transaction) + `assign` |
 | `app/services/warranty/product_facts.rb` | app/shopify/product-facts.server.ts (`ProductFactsLoader`) + app/models/product-facts.ts (`ProductFacts` type) | done | per-instance memo + `ShopifyCache` (Postgres-shared outside tests) |
 
@@ -647,7 +647,7 @@ the model layer.
 | `test/services/shopify/admin_api_test.rb` | test/unit/shopify/draft-orders.test.ts, graphql.test.ts | done | REST assertions → GraphQL operations/variables; adds throttling + userErrors |
 | `test/services/shopify/customer_signing_key_test.rb` | test/unit/shopify/customer-signing-key.test.ts + test/integration/wiring/shop-proxy-wiring.test.ts | done | integration: afterAuth saves the key encrypted, publish failure retried |
 | `test/services/shopify/customer_token_test.rb` | test/unit/customer-token.test.ts | done | the shopify-api duplicate was dropped (it accepted upper-case hex, Rails didn't); end-to-end with the Shop row key in test/integration/wiring/shop-proxy-wiring.test.ts |
-| `test/services/trade-ins/trade_ins_test.rb` | test/integration/services/trade-ins/trade-ins.test.ts | wip | CreditIssuer half in test/integration/services/trade-ins/credit-issuer.test.ts; Quoter/Submission/Workflow remain (wave 2) |
+| `test/services/trade_ins/trade_ins_test.rb` | test/integration/services/trade-ins/trade-ins.test.ts | wip | CreditIssuer half in test/integration/services/trade-ins/credit-issuer.test.ts; Quoter/Submission/Workflow remain (wave 2) |
 | `test/services/warranty/cover_assigner_test.rb` | test/integration/services/warranty/cover-assigner.test.ts | done |  |
 
 ### Tests: jobs (3)

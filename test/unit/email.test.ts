@@ -52,6 +52,17 @@ describe("sendEmail with the log adapter", () => {
     expect(log.sent).toHaveLength(0);
   });
 
+  it("passes extra headers through, stripped of line breaks", async () => {
+    await sendEmail(
+      message({
+        headers: { "List-Unsubscribe": "<https://x.test/u>\r\nBcc: z@y" },
+      }),
+    );
+    expect(log.sent[0].headers).toEqual({
+      "List-Unsubscribe": "<https://x.test/u> Bcc: z@y",
+    });
+  });
+
   it("can be cleared between assertions", async () => {
     await sendEmail(message());
     log.clear();

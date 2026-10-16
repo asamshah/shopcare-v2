@@ -120,8 +120,13 @@ Foundation in place: `app/services/email.server.ts`, which defines
 `sendEmail({ shopId, to, subject, html, text, replyTo, fromName, tags,
 idempotencyKey })` with a Resend adapter (default when `RESEND_API_KEY` is set)
 and a `log` adapter (dev/test; captures messages). Provider types stay inside
-the adapter, so a Postmark adapter can be added later. Templates and sending
-logic are **not built yet**.
+the adapter, so a Postmark adapter can be added later.
+
+Built (`app/services/notifications.server.ts` + `app/services/notifications/`):
+templates, the dispatcher, the `notification` job, consent check, Flow and
+Klaviyo clients. Still to wire at integration: the Prisma `NotificationStore`,
+the shop settings loader, `setNotificationDeps()`, the unsubscribe route and
+the Resend bounce/complaint webhook + suppression list.
 
 ### Emails
 
@@ -178,8 +183,11 @@ it. Guests have no consent record, so they are always skipped.
 - Idempotency key per event, `<event>:<record id>` (e.g.
   `repair_status_changed:ticket_42:ready`), with a **unique index** on
   `(shop_id, channel, idempotency_key)` in `notification_deliveries`. A
-  duplicate webhook or retry finds the existing row and stops. The same key is
-  passed to the provider as its `Idempotency-Key`.
+  duplicate webhook or retry finds the existing row and stops. The provider's
+  `Idempotency-Key` is `<shop>:<channel>:<key>`, because provider keys are
+  account-wide. Channels: `email` (customer), `staff_email`, `flow`,
+  `klaviyo`; one event makes at most one row per channel.
+- "Add Care to your purchase" is **off by default** (merchant opts in).
 - `notification_deliveries` keeps its Rails role as the log merchants see
   (pending / sent / skipped / failed), with new channel `email`, plus
   `provider_message_id`, `idempotency_key`, `attempts`, `last_error`.
@@ -273,7 +281,7 @@ the model layer.
 | `app/models/concerns/product_grouped.rb` | app/models/product-grouped.server.ts | done | |
 | `app/models/cover.rb` | prisma/schema.prisma `Cover` + app/models/cover.server.ts | done | `record_claim!` uses withRowLock |
 | `app/models/item.rb` | prisma/schema.prisma `Item` + app/models/item.server.ts | done | cover helpers take the item with its covers loaded (`findItemWithCovers`) |
-| `app/models/notification_delivery.rb` | prisma/schema.prisma `NotificationDelivery` + app/models/notification-delivery.server.ts | done | keeps its role as the per-event delivery log + idempotency record; adds channel "email" (see Notifications) |
+| `app/models/notification_delivery.rb` | prisma/schema.prisma `NotificationDelivery` + app/models/notification-delivery.server.ts | done | keeps its role as the per-event delivery log + idempotency record; adds channel "email" (see Notifications); `NotificationStore` interface + in-memory store in app/services/notifications/store.server.ts, Prisma implementation pending (integration) |
 | `app/models/part.rb` | prisma/schema.prisma `Part` + app/models/part.server.ts | done | default variant created in the same transaction (was `after_save`) |
 | `app/models/part_import.rb` | prisma/schema.prisma `PartImport` + app/models/part-import.server.ts | done | `importer` moves to app/services/parts/csv-import |
 | `app/models/part_variant.rb` | prisma/schema.prisma `PartVariant` + app/models/part-variant.server.ts | done | `move_stock!` uses withRowLock |
@@ -312,10 +320,10 @@ the model layer.
 | `app/services/items/recorder.rb` | app/services/items/recorder.server.ts | todo |  |
 | `app/services/items/refund_processor.rb` | app/services/items/refund-processor.server.ts | todo |  |
 | `app/services/items/registration_submission.rb` | app/services/items/registration-submission.server.ts | todo |  |
-| `app/services/notifications/delivery_error.rb` | app/services/notifications/delivery-error.server.ts | todo |  |
-| `app/services/notifications/dispatcher.rb` | app/services/notifications/dispatcher.server.ts | todo | v2: adds email channel as the default delivery (see Notifications) |
-| `app/services/notifications/flow_client.rb` | app/services/notifications/flow-client.server.ts | todo | optional integration, unchanged trigger set |
-| `app/services/notifications/klaviyo_client.rb` | app/services/notifications/klaviyo-client.server.ts | todo | optional integration, unchanged event set |
+| `app/services/notifications/delivery_error.rb` | app/services/notifications/delivery-error.server.ts | done | adds `retryable` |
+| `app/services/notifications/dispatcher.rb` | app/services/notifications.server.ts (`emitNotification`, `deliverNotification`) + notifications/events.server.ts (EVENTS) | done | v2: email + staff_email channels, per-email toggles, consent at send time; templates in notifications/templates.server.ts. Deps wired by `setNotificationDeps()` at integration |
+| `app/services/notifications/flow_client.rb` | app/services/notifications/flow-client.server.ts | done | optional integration, unchanged trigger set; GraphQL client injected |
+| `app/services/notifications/klaviyo_client.rb` | app/services/notifications/klaviyo-client.server.ts | done | optional integration, unchanged event set; only 429/5xx/network retried |
 | `app/services/parts/consumer.rb` | app/services/parts/consumer.server.ts | todo |  |
 | `app/services/parts/csv_export.rb` | app/services/parts/csv-export.server.ts | todo |  |
 | `app/services/parts/csv_import.rb` | app/services/parts/csv-import.server.ts | todo | upload → storage.server.ts; long imports → background job |
@@ -327,7 +335,7 @@ the model layer.
 | `app/services/parts/ticket_costs.rb` | app/services/parts/ticket-costs.server.ts | todo |  |
 | `app/services/repairs/catalog_search.rb` | app/services/repairs/catalog-search.server.ts | todo |  |
 | `app/services/repairs/customer_redactor.rb` | app/services/repairs/customer-redactor.server.ts | todo |  |
-| `app/services/repairs/event_payload.rb` | app/services/repairs/event-payload.server.ts | todo |  |
+| `app/services/repairs/event_payload.rb` | app/services/repairs/event-payload.server.ts | done | takes plain ticket/quotation objects |
 | `app/services/repairs/intake_submission.rb` | app/services/repairs/intake-submission.server.ts | todo |  |
 | `app/services/repairs/order_lookup.rb` | app/services/repairs/order-lookup.server.ts | todo |  |
 | `app/services/repairs/payment_processor.rb` | app/services/repairs/payment-processor.server.ts | todo |  |
@@ -337,9 +345,9 @@ the model layer.
 | `app/services/repairs/quote_canceller.rb` | app/services/repairs/quote-canceller.server.ts | todo |  |
 | `app/services/repairs/quote_decision.rb` | app/services/repairs/quote-decision.server.ts | todo |  |
 | `app/services/repairs/quote_draft_order.rb` | app/services/repairs/quote-draft-order.server.ts | todo |  |
-| `app/services/repairs/quote_notifications.rb` | app/services/repairs/quote-notifications.server.ts | todo |  |
+| `app/services/repairs/quote_notifications.rb` | app/services/repairs/quote-notifications.server.ts | todo | call `emitNotification("quote_paid"\|"quote_declined"\|"quote_expired", …)`; field mapping already in notifications/events.server.ts |
 | `app/services/repairs/quote_sender.rb` | app/services/repairs/quote-sender.server.ts | todo |  |
-| `app/services/repairs/webhook_delivery.rb` | app/services/repairs/webhook-delivery.server.ts | todo |  |
+| `app/services/repairs/webhook_delivery.rb` | app/services/repairs/webhook-delivery.server.ts | done | SSRF guard: strict outside development/test, every resolved address public (wider ranges than Rails), connection pinned, no redirects |
 | `app/services/shopify/admin_api.rb` | app/services/shopify/admin-api.server.ts | todo | → thin wrapper over `admin.graphql` / `unauthenticated.admin(shop)`; tests use test/support/fake-graphql.ts |
 | `app/services/shopify/customer_signing_key.rb` | app/services/shopify/customer-signing-key.server.ts | todo | uses encryption.server.ts |
 | `app/services/shopify/customer_token.rb` | app/services/shopify/customer-token.server.ts | done | takes the key instead of the shop; the key lookup is injected (`AppProxyDeps.customerSigningKey`) |
@@ -405,9 +413,9 @@ the model layer.
 | `app/jobs/customers_redact_job.rb` | app/jobs/webhooks/customers-redact.server.ts | todo | `webhook` job handler CUSTOMERS_REDACT |
 | `app/jobs/expire_quotes_job.rb` | app/jobs/expire-quotes.server.ts | todo | daily 03:00 (config/recurring.yml) → scheduled function `netlify/functions/expire-quotes.mts` → enqueue |
 | `app/jobs/import_orders_job.rb` | app/jobs/import-orders.server.ts | todo | may exceed 15 min on big shops: page through and re-enqueue itself with a cursor |
-| `app/jobs/notification_job.rb` | app/jobs/notification.server.ts | todo | one delivery per invocation; retries via background-function retry + attempts column |
+| `app/jobs/notification_job.rb` | app/jobs/notification.server.ts | done | one delivery per invocation; retryable errors rethrown until attempts = 3, then failed |
 | `app/jobs/orders_paid_job.rb` | app/jobs/webhooks/orders-paid.server.ts | todo | `webhook` job handler ORDERS_PAID |
-| `app/jobs/outbound_webhook_job.rb` | app/jobs/outbound-webhook.server.ts | todo |  |
+| `app/jobs/outbound_webhook_job.rb` | app/jobs/outbound-webhook.server.ts | done | job `outbound-webhook`; `emitOutboundWebhook()`; context loader wired by `setOutboundWebhookDeps()` at integration |
 | `app/jobs/refunds_create_job.rb` | app/jobs/webhooks/refunds-create.server.ts | todo | `webhook` job handler REFUNDS_CREATE |
 | `app/jobs/shop_redact_job.rb` | app/jobs/webhooks/shop-redact.server.ts | todo | `webhook` job handler SHOP_REDACT |
 | `app/jobs/shop_webhook_job.rb` | app/jobs/webhooks/shop-webhook.server.ts | todo | base class → shared helper in app/jobs/webhook.server.ts |
@@ -510,13 +518,13 @@ the model layer.
 | `test/services/items/recorder_test.rb` | test/integration/services/items/recorder.test.ts | todo |  |
 | `test/services/items/refund_processor_test.rb` | test/integration/services/items/refund-processor.test.ts | todo |  |
 | `test/services/items/registration_submission_test.rb` | test/integration/services/items/registration-submission.test.ts | todo |  |
-| `test/services/notifications/notifications_test.rb` | test/integration/services/notifications/notifications.test.ts | todo |  |
+| `test/services/notifications/notifications_test.rb` | test/unit/notifications/{notifications,integrations,templates}.test.ts | done | pure (in-memory store); adds consent, toggles, idempotency, retries, escaping, snapshots, Flow TOML parity. Encryption-at-rest of the Klaviyo key goes with the Shop model |
 | `test/services/parts/csv_import_test.rb` | test/integration/services/parts/csv-import.test.ts | todo |  |
 | `test/services/parts/item_properties_test.rb` | test/integration/services/parts/item-properties.test.ts | todo |  |
 | `test/services/parts/planning_test.rb` | test/integration/services/parts/planning.test.ts | todo |  |
 | `test/services/parts/reorder_and_sync_test.rb` | test/integration/services/parts/reorder-and-sync.test.ts | todo |  |
 | `test/services/repairs/customer_redactor_test.rb` | test/integration/services/repairs/customer-redactor.test.ts | todo |  |
-| `test/services/repairs/event_payload_test.rb` | test/integration/services/repairs/event-payload.test.ts | todo |  |
+| `test/services/repairs/event_payload_test.rb` | test/unit/repairs/outbound-webhook.test.ts | done |  |
 | `test/services/repairs/intake_submission_test.rb` | test/integration/services/repairs/intake-submission.test.ts | todo |  |
 | `test/services/repairs/order_lookup_and_catalog_test.rb` | test/integration/services/repairs/order-lookup-and-catalog.test.ts | todo |  |
 | `test/services/repairs/payment_processor_test.rb` | test/integration/services/repairs/payment-processor.test.ts | todo |  |
@@ -525,7 +533,7 @@ the model layer.
 | `test/services/repairs/quote_canceller_test.rb` | test/integration/services/repairs/quote-canceller.test.ts | todo |  |
 | `test/services/repairs/quote_decision_test.rb` | test/integration/services/repairs/quote-decision.test.ts | todo |  |
 | `test/services/repairs/quote_sender_test.rb` | test/integration/services/repairs/quote-sender.test.ts | todo |  |
-| `test/services/repairs/webhook_delivery_test.rb` | test/integration/services/repairs/webhook-delivery.test.ts | todo |  |
+| `test/services/repairs/webhook_delivery_test.rb` | test/unit/repairs/webhook-delivery.test.ts | done |  |
 | `test/services/shopify/admin_api_test.rb` | test/integration/services/shopify/admin-api.test.ts | todo |  |
 | `test/services/shopify/customer_signing_key_test.rb` | test/integration/services/shopify/customer-signing-key.test.ts | todo |  |
 | `test/services/shopify/customer_token_test.rb` | test/unit/customer-token.test.ts | done | "encrypted at rest" case moves to the Shop model port; proxy_orders token cases are in test/unit/app-proxy.test.ts |
@@ -537,7 +545,7 @@ the model layer.
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
 | `test/jobs/after_authenticate_job_test.rb` | test/integration/jobs/after-authenticate-job.test.ts | todo |  |
-| `test/jobs/outbound_webhook_job_test.rb` | test/integration/jobs/outbound-webhook-job.test.ts | todo |  |
+| `test/jobs/outbound_webhook_job_test.rb` | test/unit/repairs/outbound-webhook.test.ts | done |  |
 | `test/jobs/shop_webhook_jobs_test.rb` | test/integration/jobs/shop-webhook-jobs.test.ts | todo |  |
 
 ### Tests: integration (request) (15)

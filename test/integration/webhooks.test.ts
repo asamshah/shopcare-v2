@@ -326,7 +326,8 @@ describe("Shopify webhooks", () => {
   });
 
   describe("customers/data_request", () => {
-    it("leaves data intact and stores a JSON export the admin lists (no email)", async () => {
+    it("leaves data intact, stores a JSON export the admin lists, and fires the optional Flow trigger (no email)", async () => {
+      shop = await prisma.shop.update({ where: { id: shop.id }, data: { settings: { notifications: { flow: true } } } });
       const ticket = await createRepairTicketFor(shop, {
         shopifyCustomerId: "9",
         customerEmail: "a@example.com",
@@ -368,6 +369,24 @@ describe("Shopify webhooks", () => {
           counts: { tickets: 1, items: 1, tradeIns: 0, deliveries: 0 },
         },
       ]);
+      const alerts = await prisma.notificationDelivery.findMany({ where: { event: "data_request" } });
+      expect(alerts.map((a) => [a.channel, a.idempotencyKey])).toEqual([["flow", "data_request:request_9999"]]);
+      const data = (alerts[0].payload as { data: Record<string, string> }).data;
+      expect(data).toMatchObject({
+        customer: "a@example.com",
+        summary: "1 repair ticket, 1 item, 0 trade-ins, 0 notifications",
+        adminUrl: "https://admin.shopify.com/store/jobs-test/apps/shopcare/app/settings#data-requests",
+      });
+      expect(verifySignedUrl(new URL(data.downloadUrl))).toBe(key);
+    });
+
+    it("with Flow off, the export is still stored and nothing is sent", async () => {
+      await deliver(dataRequest, "customers/data_request", shop.shopifyDomain, { customer: { id: 9 }, data_request: { id: 1 } });
+      expect(await prisma.notificationDelivery.count()).toBe(0);
+      const settings = (await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } })).settings as {
+        gdpr_exports: { customer: string }[];
+      };
+      expect(settings.gdpr_exports.map((e) => e.customer)).toEqual(["customer 9"]);
     });
   });
 });

@@ -1,0 +1,33 @@
+# Shopify Flow trigger (staff alert): Shopify passed on a customer's data
+# request (GDPR customers/data_request) and ShopCare's export of what it holds
+# about them is ready. No customer reference. Add Flow's "Send internal email"
+# to be told; the ShopCare admin shows it (home page banner, Settings →
+# Customer data requests) either way.
+# (uid is added by `shopify app deploy`.)
+[[extensions]]
+name = "Customer data request"
+type = "flow_trigger"
+handle = "shopcare-data-request"
+description = "A customer's data export from ShopCare is ready to send them."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Request ID"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Customer"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Records found"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Download URL"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Admin URL"

@@ -96,7 +96,23 @@ export interface EventData {
   quote_paid: QuoteAlertBase & { orderName: string };
   quote_declined: QuoteAlertBase & { reason: string };
   quote_expired: QuoteAlertBase & { validUntil: string };
-  /** Flow/Klaviyo only (parked trigger); no ShopCare email yet. */
+  /**
+   * GDPR customers/data_request: the export is stored and shown in the
+   * admin. Flow only (staff alert); never Klaviyo, which would put the
+   * export link on the customer's own profile.
+   */
+  data_request: {
+    requestId: string;
+    /** The customer's email, else "customer <id>". */
+    customer: string;
+    /** e.g. "1 repair ticket, 2 items, 0 trade-ins, 3 notifications". */
+    summary: string;
+    /** Signed download link (EXPORT_LINK_DAYS). */
+    downloadUrl: string;
+    /** Settings → Customer data requests in the ShopCare admin. */
+    adminUrl: string;
+  };
+  /** Flow/Klaviyo only (parked trigger). */
   trade_in_status_changed: {
     tradeInId: Id;
     /** Rails status, e.g. "approved". */
@@ -144,10 +160,18 @@ function quoteBaseFields(data: QuoteAlertBase): FlowFields {
 
 export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
   repair_submitted: {
+    flowHandle: "shopcare-repair-submitted",
+    klaviyoMetric: "ShopCare Repair Submitted",
+    staffAlert: true,
     recordKey: (d) => `ticket_${d.ticketId}`,
     fields: (d) => ({
       "Ticket number": String(d.ticketId),
       "Product title": d.productTitle,
+      "Customer name": d.customerName ?? "",
+      "Customer email": d.customerEmail ?? "",
+      // A single-line Flow field: newlines flattened, kept short.
+      Description: (d.description ?? "").replace(/\s+/g, " ").trim().slice(0, 500),
+      "Admin URL": d.adminUrl ?? "",
     }),
   },
   repair_status_changed: {
@@ -214,6 +238,18 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
     staffAlert: true,
     recordKey: (d) => `quotation_${d.quotationId}`,
     fields: (d) => ({ ...quoteBaseFields(d), "Valid until": d.validUntil }),
+  },
+  data_request: {
+    flowHandle: "shopcare-data-request",
+    staffAlert: true,
+    recordKey: (d) => `request_${d.requestId}`,
+    fields: (d) => ({
+      "Request ID": d.requestId,
+      Customer: d.customer,
+      "Records found": d.summary,
+      "Download URL": d.downloadUrl,
+      "Admin URL": d.adminUrl,
+    }),
   },
   trade_in_status_changed: {
     flowHandle: "shopcare-trade-in-status",

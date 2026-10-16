@@ -1,0 +1,36 @@
+# Shopify Flow trigger (staff alert): a customer sent a repair request from
+# the storefront. No customer reference, so it fires for guests too: add
+# Flow's "Send internal email" to tell the workshop. Optional: the ShopCare
+# admin lists new requests under Needs attention either way.
+# (uid is added by `shopify app deploy`.)
+[[extensions]]
+name = "Repair request submitted"
+type = "flow_trigger"
+handle = "shopcare-repair-submitted"
+description = "A customer asked for a repair from your storefront."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Ticket number"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Product title"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Customer name"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Customer email"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Description"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Admin URL"

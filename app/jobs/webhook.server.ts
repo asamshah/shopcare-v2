@@ -1,7 +1,8 @@
 import type { Shop } from "@prisma/client";
 import prisma from "../db.server";
 import type { FileStorage } from "../lib/storage.server";
-import { tradeInEnabled } from "../models/shop.server";
+import { adminAppUrl, tradeInEnabled } from "../models/shop.server";
+import { notify } from "../services/notifications/notify.server";
 import { notifyCareActivated } from "../services/care/notices.server";
 import { customerRefFromWebhook } from "../services/gdpr/customer-match.server";
 import { exportCustomerData } from "../services/gdpr/customer-export.server";
@@ -130,6 +131,27 @@ const customersDataRequest: TopicHandler = async (shop, payload, ctx) => {
     db: ctx.db,
     storage: ctx.storage,
   });
+  // Optional staff alert (Flow "Send internal email"); the admin shows the export either way.
+  const { tickets, items, tradeIns, deliveries } = result.counts;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  await notify(
+    shop.shopifyDomain,
+    "data_request",
+    { customerId: null, email: null },
+    {
+      requestId,
+      customer: result.customer,
+      summary: [
+        plural(tickets, "repair ticket"),
+        plural(items, "item"),
+        plural(tradeIns, "trade-in"),
+        plural(deliveries, "notification"),
+      ].join(", "),
+      downloadUrl: result.url,
+      adminUrl: adminAppUrl(shop.shopifyDomain, "settings#data-requests"),
+    },
+    { db: ctx.db, deps: ctx.notifyDeps },
+  );
   console.info(
     `[job:webhook] customers/data_request shop=${shop.shopifyDomain} tickets=${result.counts.tickets} items=${result.counts.items} trade_ins=${result.counts.tradeIns}`,
   );

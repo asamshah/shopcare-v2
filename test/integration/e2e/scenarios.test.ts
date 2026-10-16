@@ -127,7 +127,7 @@ describe("end-to-end scenarios", () => {
       "images[]": [pngFile()],
     });
     expect((await ticketOf(ticketId)).status).toBe("new");
-    expect(await events("repair_submitted")).toEqual([]);
+    expect(await events("repair_submitted")).toEqual(["flow"]);
 
     // 2. Staff build the quote in the admin (price from Shopify) and send it.
     expect(await addLineItem(shop, adminApi(), ticketId, { kind: "repair", variantId: "900", quantity: 1 } as never)).toEqual({

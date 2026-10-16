@@ -190,9 +190,14 @@ export function repairStatusUrl(shop: Pick<Shop, "settings">): string | null {
  * for Flow staff alerts and the postage slip's QR code. SHOPIFY_APP_HANDLE is the app's handle in the admin URL.
  */
 export function adminTicketUrl(shopDomain: string, ticketId: number): string {
+  return adminAppUrl(shopDomain, `tickets/${ticketId}`);
+}
+
+/** A page of the ShopCare admin, e.g. adminAppUrl(shop, "settings"). */
+export function adminAppUrl(shopDomain: string, path: string): string {
   const store = shopDomain.replace(/\.myshopify\.com$/, "");
   const handle = process.env.SHOPIFY_APP_HANDLE || "shopcare";
-  return `https://admin.shopify.com/store/${store}/apps/${handle}/app/tickets/${ticketId}`;
+  return `https://admin.shopify.com/store/${store}/apps/${handle}/app/${path}`;
 }
 
 /**

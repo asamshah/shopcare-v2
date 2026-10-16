@@ -52,7 +52,21 @@ function declaredFields(toml: string) {
 }
 
 const samples: { [E in EventName]: EventData[E] } = {
-  repair_submitted: { ticketId: 1, productTitle: "Boot" },
+  repair_submitted: {
+    ticketId: 1,
+    productTitle: "Boot",
+    customerName: "Sam",
+    customerEmail: "s@example.com",
+    description: "Heel\n  worn",
+    adminUrl: "https://admin.shopify.com/store/acme/apps/shopcare/app/tickets/1",
+  },
+  data_request: {
+    requestId: "9999",
+    customer: "s@example.com",
+    summary: "1 repair ticket, 0 items, 0 trade-ins, 0 notifications",
+    downloadUrl: "https://shopcare.test/files/x?sig=y",
+    adminUrl: "https://admin.shopify.com/store/acme/apps/shopcare/app/settings#data-requests",
+  },
   repair_status_changed: {
     ticketId: 1,
     status: "in_repair",
@@ -129,10 +143,12 @@ describe("Flow trigger payloads match the extension TOMLs", () => {
       "shopcare-care-activated",
       "shopcare-care-credit",
       "shopcare-care-offer",
+      "shopcare-data-request",
       "shopcare-quote-declined",
       "shopcare-quote-expired",
       "shopcare-quote-paid",
       "shopcare-repair-status",
+      "shopcare-repair-submitted",
       "shopcare-trade-in-status",
     ]);
   });
@@ -156,12 +172,16 @@ describe("Flow trigger payloads match the extension TOMLs", () => {
     }
   });
 
-  it("every event has a Klaviyo metric exactly when it has a Flow trigger", () => {
+  it("every event has a Klaviyo metric exactly when it has a Flow trigger, except the GDPR data request", () => {
     for (const event of Object.keys(EVENTS) as EventName[]) {
       expect(Boolean(EVENTS[event].klaviyoMetric), event).toBe(
-        Boolean(EVENTS[event].flowHandle),
+        Boolean(EVENTS[event].flowHandle) && event !== "data_request",
       );
     }
+  });
+
+  it("flattens a repair request's description into one line", () => {
+    expect(EVENTS.repair_submitted.fields(samples.repair_submitted).Description).toBe("Heel worn");
   });
 
   it("formats the repair status like Rails", () => {

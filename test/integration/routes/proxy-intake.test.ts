@@ -230,10 +230,15 @@ describe("POST /proxy/intake", () => {
     expect(log.body).toBe("Product chosen from the catalogue: purchase not verified, no cover applied.");
   });
 
-  it("queues the outbound webhook; no email", async () => {
+  it("queues the outbound webhook and the optional repair_submitted Flow trigger", async () => {
     await prisma.shop.update({
       where: { id: shop.id },
-      data: { settings: { webhook_url: "https://hooks.example.com/shopcare", notifications: { status_url: "https://proxy-test.example/pages/repairs" } } },
+      data: {
+        settings: {
+          webhook_url: "https://hooks.example.com/shopcare",
+          notifications: { flow: true, status_url: "https://proxy-test.example/pages/repairs" },
+        },
+      },
     });
     const body = await json(await post({ description: "Sole", customer_email: "c@example.com", product_title: "Boot" }));
 
@@ -241,7 +246,11 @@ describe("POST /proxy/intake", () => {
       { name: "outbound-webhook", payload: { shopId: String(shop.id), ticketId: String(body.ticket_id), event: "submitted" } },
     ]);
     const deliveries = [...fakes.notifications.store.deliveries.values()];
-    // No ShopCare email for a new request.
-    expect(deliveries.map((d) => [d.event, d.channel])).toEqual([]);
+    // No ShopCare email: the optional Flow staff alert (Flow is on here).
+    expect(deliveries.map((d) => [d.event, d.channel])).toEqual([["repair_submitted", "flow"]]);
+    expect(deliveries[0].payload.data).toMatchObject({
+      customerEmail: "c@example.com",
+      adminUrl: `https://admin.shopify.com/store/proxy-test/apps/shopcare/app/tickets/${body.ticket_id}`,
+    });
   });
 });

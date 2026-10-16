@@ -79,6 +79,9 @@ export async function saveSettings(
   if (has(form, "quote_valid_days")) {
     next.quote_valid_days = String(clampInt(field(form, "quote_valid_days"), 1, 90));
   }
+  if (has(form, "awaiting_item_days")) {
+    next.awaiting_item_days = String(clampInt(field(form, "awaiting_item_days"), 1, 365));
+  }
   if (has(form, "email[subject]") || has(form, "email[body]")) {
     next.email = {
       subject: field(form, "email[subject]").slice(0, 255),

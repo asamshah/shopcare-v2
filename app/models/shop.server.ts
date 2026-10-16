@@ -276,6 +276,15 @@ export function quoteValidDays(shop: Pick<Shop, "settings">): number {
   return days > 0 ? days : 14;
 }
 
+/**
+ * Days after payment a ticket still awaiting the customer's item shows under
+ * Needs attention (settings.awaiting_item_days, default 14).
+ */
+export function awaitingItemDays(shop: Pick<Shop, "settings">): number {
+  const days = parseInt(String(settingsOf(shop).awaiting_item_days ?? ""), 10);
+  return days > 0 ? days : 14;
+}
+
 export function proxyPathPrefix(shop: Pick<Shop, "settings">): string {
   const prefix = settingsOf(shop).proxy_path_prefix;
   return typeof prefix === "string" && prefix.trim() ? prefix : DEFAULT_PROXY_PATH_PREFIX;

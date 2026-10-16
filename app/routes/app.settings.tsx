@@ -10,6 +10,7 @@ import { useElementValue } from "../components/use-element-value";
 import { formatShortDateTime, statusLabel } from "../lib/format";
 import { RECENT_ORDER as DELIVERIES_ORDER } from "../models/notification-delivery.server";
 import {
+  awaitingItemDays,
   careOfferDelayDays,
   careSettings,
   completeWorkshopAddress,
@@ -28,6 +29,8 @@ import { requireAdmin } from "../services/admin/context.server";
 import { redirectWithFlash } from "../services/admin/flash.server";
 import { field, parse, readForm } from "../services/admin/form.server";
 import { hasSecret, saveSettings, sendKlaviyoTest } from "../services/admin/settings.server";
+import { gdprExports } from "../services/gdpr/customer-export.server";
+import { signedUrl } from "../lib/storage.server";
 
 const CHANNEL_LABELS: Record<string, string> = {
   flow: "Shopify Flow",
@@ -57,6 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     repairOrderTag: text(settings.repair_order_tag),
     currency: text(settings.currency),
     quoteValidDays: quoteValidDays(shop),
+    awaitingItemDays: awaitingItemDays(shop),
     workshopAddress: workshopAddress(shop),
     workshopAddressComplete: completeWorkshopAddress(shop) !== null,
     postingInstructions: text(settings.posting_instructions),
@@ -77,6 +81,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     webhookUrl: text(settings.webhook_url),
     hasKlaviyoKey: hasSecret(shop, "klaviyoApiKey"),
     hasWebhookSecret: hasSecret(shop, "webhookSecret"),
+    // GDPR data requests: ShopCare's exports, downloadable for an hour from this page.
+    dataRequests: gdprExports(shop).map((e) => ({
+      key: e.key,
+      when: formatShortDateTime(new Date(e.created_at)),
+      customer: e.customer ?? "a customer",
+      counts: e.counts
+        ? `${e.counts.tickets} tickets, ${e.counts.items} items, ${e.counts.tradeIns} trade-ins, ${e.counts.deliveries} notifications`
+        : "",
+      url: signedUrl(e.key, { expiresInSeconds: 3600 }),
+    })),
     deliveries: deliveries.map((d) => ({
       id: d.id,
       when: formatShortDateTime(d.createdAt),
@@ -181,6 +195,14 @@ export default function Settings() {
                   min={1}
                   max={90}
                   details="How long a customer has to pay (accept) a quote's invoice before it expires and stops working."
+                ></s-number-field>
+                <s-number-field
+                  label="Chase items not posted after (days)"
+                  name="awaiting_item_days"
+                  value={String(d.awaitingItemDays)}
+                  min={1}
+                  max={365}
+                  details="A paid repair whose item hasn't arrived shows under Needs attention after this many days."
                 ></s-number-field>
               </s-grid>
 
@@ -435,6 +457,44 @@ export default function Settings() {
           </s-stack>
         </s-stack>
       </Form>
+
+      <div id="data-requests">
+        <s-section heading="Customer data requests">
+          <s-stack direction="block" gap="small-200">
+            <s-paragraph color="subdued">
+              When a customer asks your store for their data, Shopify tells ShopCare and ShopCare exports what it holds
+              about them (JSON). Download it and send the customer what they asked for. Exports are deleted after 30
+              days. For an email when one arrives, use the &quot;Customer data request&quot; Flow trigger.
+            </s-paragraph>
+            {d.dataRequests.length ? (
+              <s-table variant="auto">
+                <s-table-header-row>
+                  <s-table-header list-slot="secondary">When</s-table-header>
+                  <s-table-header list-slot="primary">Customer</s-table-header>
+                  <s-table-header>Found</s-table-header>
+                  <s-table-header></s-table-header>
+                </s-table-header-row>
+                <s-table-body>
+                  {d.dataRequests.map((r) => (
+                    <s-table-row key={r.key}>
+                      <s-table-cell>{r.when}</s-table-cell>
+                      <s-table-cell>{r.customer}</s-table-cell>
+                      <s-table-cell>{r.counts}</s-table-cell>
+                      <s-table-cell>
+                        <s-link href={r.url} target="_blank">
+                          Download export
+                        </s-link>
+                      </s-table-cell>
+                    </s-table-row>
+                  ))}
+                </s-table-body>
+              </s-table>
+            ) : (
+              <s-paragraph color="subdued">No data requests.</s-paragraph>
+            )}
+          </s-stack>
+        </s-section>
+      </div>
 
       <s-section heading="Recent notifications">
         <s-stack direction="block" gap="base">

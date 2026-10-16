@@ -4,8 +4,10 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { Pagination } from "../components/pagination";
 import { SetupWizard } from "../components/setup-wizard";
 import { requireAdmin } from "../services/admin/context.server";
+import { needsAttention } from "../services/admin/needs-attention.server";
 import { wizardData } from "../services/admin/setup.server";
 import { ticketList } from "../services/admin/tickets.server";
+import { gdprExports } from "../services/gdpr/customer-export.server";
 
 // GET /app/tickets — the workbench home (Rails TicketsController#index).
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -17,7 +19,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     q: url.searchParams.get("q"),
     page,
   });
-  return { ...list, wizard: await wizardData(shop, url.searchParams.get("setup_step")) };
+  // Needs attention: only on the unfiltered first page, the "home" view.
+  const home = !list.statusFilter && !list.query && page === 1;
+  return {
+    ...list,
+    wizard: await wizardData(shop, url.searchParams.get("setup_step")),
+    attention: home ? await needsAttention(shop) : null,
+    dataRequests: gdprExports(shop).length,
+  };
 };
 
 export default function Tickets() {
@@ -33,6 +42,51 @@ export default function Tickets() {
   return (
     <s-page heading="Repair tickets">
       {data.wizard ? <SetupWizard wizard={data.wizard} /> : null}
+
+      {data.dataRequests ? (
+        <s-banner tone="warning" heading="Customer data request">
+          Shopify passed on {data.dataRequests === 1 ? "a customer's data request" : `${data.dataRequests} data requests`}.
+          ShopCare&apos;s export is ready: <s-link href="/app/settings#data-requests">download it in Settings</s-link> and
+          send the customer what they asked for.
+        </s-banner>
+      ) : null}
+
+      {data.attention && data.attention.total > 0 ? (
+        <s-section heading={`Needs attention (${data.attention.total})`}>
+          <s-stack direction="block" gap="base">
+            {data.attention.groups.map((g) => (
+              <s-stack key={g.group} direction="block" gap="small-200">
+                <s-heading>
+                  {g.label} ({g.count})
+                </s-heading>
+                {g.group === "awaiting_item" ? (
+                  <s-text color="subdued">Paid more than {data.attention!.awaitingItemDays} days ago.</s-text>
+                ) : null}
+                <s-table variant="list">
+                  <s-table-header-row>
+                    <s-table-header list-slot="kicker">ID</s-table-header>
+                    <s-table-header list-slot="primary">Customer</s-table-header>
+                    <s-table-header list-slot="secondary">Product</s-table-header>
+                    <s-table-header list-slot="inline">Detail</s-table-header>
+                  </s-table-header-row>
+                  <s-table-body>
+                    {g.rows.map((r) => (
+                      <s-table-row key={r.ticketId}>
+                        <s-table-cell>
+                          <s-link href={`/app/tickets/${r.ticketId}`}>#{r.ticketId}</s-link>
+                        </s-table-cell>
+                        <s-table-cell>{r.customer}</s-table-cell>
+                        <s-table-cell>{r.product}</s-table-cell>
+                        <s-table-cell>{r.detail}</s-table-cell>
+                      </s-table-row>
+                    ))}
+                  </s-table-body>
+                </s-table>
+              </s-stack>
+            ))}
+          </s-stack>
+        </s-section>
+      ) : null}
 
       <s-section padding="base">
         <s-stack direction="inline" gap="small-200" align-items="center">

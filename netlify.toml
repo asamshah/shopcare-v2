@@ -12,7 +12,8 @@
   NODE_VERSION = "22"
 
 [functions]
-  # Our own functions (jobs-background, daily-example). The SSR function is
+  # Our own functions (jobs-background and the scheduled ones; their cron
+  # schedules are in each file's `config`). The SSR function is
   # written by the Vite plugin to .netlify/v1/functions.
   directory = "netlify/functions"
   node_bundler = "esbuild"

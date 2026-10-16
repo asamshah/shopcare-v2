@@ -1,6 +1,7 @@
 import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
+import netlifyReactRouter from "@netlify/vite-plugin-react-router";
 
 // Related: https://github.com/remix-run/remix/issues/2835#issuecomment-1144102176
 // Replace the HOST env var with SHOPIFY_APP_URL so that it doesn't break the Vite server.
@@ -51,6 +52,11 @@ export default defineConfig({
   plugins: [
     reactRouter(),
     tsconfigPaths(),
+    // Production build output for Netlify: wraps the React Router server build
+    // in a Netlify Function (Node.js runtime). It doesn't change `react-router
+    // dev`, so `shopify app dev` behaves exactly as in the stock template.
+    // https://docs.netlify.com/frameworks/react-router/
+    netlifyReactRouter(),
   ],
   build: {
     assetsInlineLimit: 0,

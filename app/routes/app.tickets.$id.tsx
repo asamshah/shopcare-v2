@@ -14,6 +14,7 @@ import {
   declineTicketQuote,
   linkTicketItem,
   markTicketReceived,
+  markTicketReturned,
   planParts,
   removeLineItem,
   removeTicketPart,
@@ -36,6 +37,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 const INTENTS = [
   "status", "note", "link_item", "add_line", "remove_line", "send", "resend", "revise", "decline", "cover",
   "plan_parts", "add_part", "update_part", "remove_part", "mark_received", "resend_postage",
+  "mark_returned",
 ] as const;
 
 const zQuantity = z
@@ -125,6 +127,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       break;
     case "mark_received":
       flash = await markTicketReceived(shop, id);
+      break;
+    case "mark_returned":
+      flash = await markTicketReturned(shop, admin, id, {
+        company: parse(zText(255), f("tracking_company")),
+        number: parse(zText(255), f("tracking_number")),
+        url: parse(zText(2000), f("tracking_url")),
+      });
       break;
     case "resend_postage":
       flash = await resendTicketPostageEmail(shop, id);
@@ -565,7 +574,7 @@ function QuoteDecision({ decision }: { decision: Decision }) {
 /** The customer posts the item: postage slip, resend, and "Mark received". */
 function PostageSection({ d }: { d: Detail }) {
   const { postage, ticket } = d;
-  if (!postage.awaiting && !postage.receivedAt && !postage.canMarkReceived) return null;
+  if (!postage.awaiting && !postage.receivedAt && !postage.canMarkReceived && !postage.canReturn) return null;
   return (
     <s-section heading="Item">
       <s-stack direction="block" gap="small-200">
@@ -611,6 +620,28 @@ function PostageSection({ d }: { d: Detail }) {
             </Form>
           ) : null}
         </s-stack>
+        {postage.canReturn ? (
+          <Form method="post">
+            <Intent value="mark_returned" />
+            <s-stack direction="block" gap="small-200">
+              <s-heading>Post it back</s-heading>
+              <s-paragraph color="subdued">
+                Fulfils the repair order in Shopify, so Shopify emails the customer its shipping confirmation with the
+                tracking link, and completes the ticket.
+              </s-paragraph>
+              <s-grid grid-template-columns="1fr 1fr 2fr" gap="small-200">
+                <s-text-field label="Carrier" name="tracking_company" placeholder="Royal Mail"></s-text-field>
+                <s-text-field label="Tracking number" name="tracking_number"></s-text-field>
+                <s-url-field label="Tracking link (optional)" name="tracking_url"></s-url-field>
+              </s-grid>
+              <s-stack direction="inline">
+                <s-button type="submit" variant="primary" icon="delivery">
+                  Mark returned
+                </s-button>
+              </s-stack>
+            </s-stack>
+          </Form>
+        ) : null}
       </s-stack>
     </s-section>
   );

@@ -29,9 +29,13 @@ include_config_on_deploy = true
 # write_orders        refund a Care plan when its item is refunded
 # write_discounts     credit codes offered instead of a Care refund
 # write_store_credit_account_transactions  trade-in credit as store credit
+# read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders
+#                     "Mark returned": fulfil the repair order with tracking
+#                     (fulfillmentCreate, notifyCustomer) so Shopify sends its
+#                     Shipping confirmation email (v2, needs re-approval)
 # Full purchase history needs `read_all_orders`, which Shopify gates. Request
 # approval in the Partner dashboard before adding it.
-scopes = "read_products,write_customers,read_orders,write_draft_orders,write_orders,write_discounts,write_store_credit_account_transactions"
+scopes = "read_products,write_customers,read_orders,write_draft_orders,write_orders,write_discounts,write_store_credit_account_transactions,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
 use_legacy_install_flow = false
 
 [auth]

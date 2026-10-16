@@ -59,6 +59,8 @@ import { reviseQuote } from "../quotes/revise.server";
 import { sendQuote } from "../quotes/send.server";
 import { resendPostageEmail } from "../repairs/item-postage.server";
 import { changeTicketStatus, markItemReceived } from "../repairs/ticket-status.server";
+import { RETURNABLE_STATUSES, returnRepairedItem } from "../repairs/return-item.server";
+import type { Tracking } from "../../shopify/fulfillments.server";
 import { repairProductSettings } from "../repairs/service-import.server";
 import { orNotFound, requireParts } from "./context.server";
 import type { Flash } from "./flash.server";
@@ -235,6 +237,11 @@ export async function ticketDetail(shop: Shop, admin: AdminGraphqlClient, id: nu
       canMarkReceived: open && !ticket.itemReceivedAt,
       canResend: ticket.status === "awaiting_item" && Boolean(ticket.customerEmail?.trim()),
       canDownload: open && workshop !== null,
+      /** "Mark returned": fulfils the paid repair order with tracking (Shopify's shipping confirmation). */
+      canReturn:
+        (RETURNABLE_STATUSES as readonly string[]).includes(ticket.status) &&
+        quotation?.status === "paid" &&
+        Boolean(quotation.shopifyOrderId),
     },
     quotation: quotation
       ? {
@@ -634,6 +641,18 @@ export async function removeTicketPart(shop: Shop, ticketId: number, ticketPartI
 export async function markTicketReceived(shop: Shop, ticketId: number): Promise<Outcome> {
   const ticket = await findTicket(shop, ticketId);
   const result = await markItemReceived({ shopId: shop.id, ticketId: ticket.id, actor: "staff" });
+  return result.ok ? { notice: result.message } : { alert: result.error };
+}
+
+/** "Mark returned": fulfil the repair order with tracking; Shopify emails the customer. */
+export async function markTicketReturned(
+  shop: Shop,
+  admin: AdminGraphqlClient,
+  ticketId: number,
+  tracking: Tracking,
+): Promise<Outcome> {
+  const ticket = await findTicket(shop, ticketId);
+  const result = await returnRepairedItem({ shopId: shop.id, ticketId: ticket.id, actor: "staff", tracking, client: admin });
   return result.ok ? { notice: result.message } : { alert: result.error };
 }
 

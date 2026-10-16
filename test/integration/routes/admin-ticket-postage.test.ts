@@ -10,7 +10,7 @@ import { loader as slipLoader } from "../../../app/routes/app.tickets.$id_.posta
 import { action, loader } from "../../../app/routes/app.tickets.$id";
 import { setNotificationDeps } from "../../../app/services/notifications.server";
 import { flash, get, post, signInAs } from "../../support/admin";
-import { createRepairTicketFor, createShop, WORKSHOP_SETTINGS } from "../../support/factories";
+import { createQuotationFor, createRepairTicketFor, createShop, WORKSHOP_SETTINGS } from "../../support/factories";
 import { FakeGraphql } from "../../support/fake-graphql";
 import { dbNotifyDeps } from "../../support/quotes";
 
@@ -47,7 +47,37 @@ describe("ticket page: postage", () => {
       canMarkReceived: true,
       canResend: true,
       canDownload: true,
+      canReturn: false,
     });
+  });
+
+  it("Mark returned fulfils the paid repair order with tracking and completes the ticket", async () => {
+    await setup({ ...WORKSHOP_SETTINGS }, "ready");
+    await createQuotationFor(ticket.id, { status: "paid", shopifyOrderId: "5001", paidAt: new Date() });
+    const admin = new FakeGraphql({
+      "fulfillmentOrders(": {
+        order: {
+          id: "gid://shopify/Order/5001",
+          name: "#5001",
+          fulfillmentOrders: {
+            nodes: [{ id: "gid://shopify/FulfillmentOrder/70", status: "OPEN", supportedActions: [{ action: "CREATE_FULFILLMENT" }] }],
+          },
+        },
+      },
+      "fulfillmentCreate(": { fulfillmentCreate: { fulfillment: { id: "gid://shopify/Fulfillment/88" }, userErrors: [] } },
+    });
+    signInAs(shop, { admin });
+    expect((await detail()).postage.canReturn).toBe(true);
+    const res = await post(
+      action,
+      path(),
+      { intent: "mark_returned", tracking_company: "Royal Mail", tracking_number: "RM1GB", tracking_url: "" },
+      { id: String(ticket.id) },
+    );
+    expect(flash(res).notice).toBe("Marked as returned. Shopify emailed the customer the tracking details.");
+    const create = admin.calls.find((c) => c.query.includes("fulfillmentCreate("))!;
+    expect(create.variables.fulfillment).toMatchObject({ notifyCustomer: true, trackingInfo: { number: "RM1GB" } });
+    expect((await prisma.repairTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("completed");
   });
 
   it("prompts for the workshop address when it's missing", async () => {

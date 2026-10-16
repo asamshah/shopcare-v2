@@ -1,6 +1,6 @@
-/** The credit half of Rails test/services/trade_ins/trade_ins_test.rb (CreditIssuer). */
+/** The credit half of Rails test/services/trade-ins/trade_ins_test.rb (CreditIssuer). */
 import { describe, expect, it } from "vitest";
-import { issueTradeInCredit } from "../../../../app/services/trade_ins/credit-issuer.server";
+import { issueTradeInCredit } from "../../../../app/services/trade-ins/credit-issuer.server";
 import { createShop, createTradeInFor } from "../../../support/factories";
 import { FakeGraphql } from "../../../support/fake-graphql";
 

@@ -1,8 +1,8 @@
-/** Port of the OrderLinker cases in Rails test/services/trade_ins/trade_ins_test.rb. */
+/** Port of the OrderLinker cases in Rails test/services/trade-ins/trade_ins_test.rb. */
 import type { Shop } from "@prisma/client";
 import { beforeEach, describe, expect, it } from "vitest";
 import prisma from "../../../../app/db.server";
-import { linkTradeInsToOrder } from "../../../../app/services/trade_ins/order-linker.server";
+import { linkTradeInsToOrder } from "../../../../app/services/trade-ins/order-linker.server";
 import { buildProgram, createItemFor, createShop, createTradeInFor } from "../../../support/factories";
 import { orderData, orderLine } from "../../../support/orders";
 import { dbNotifyDeps } from "../../../support/quotes";

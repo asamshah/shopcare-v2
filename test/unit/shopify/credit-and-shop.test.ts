@@ -1,5 +1,5 @@
 /**
- * Shopify calls behind trade-in credit (Rails test/services/trade_ins/
+ * Shopify calls behind trade-in credit (Rails test/services/trade-ins/
  * trade_ins_test.rb: store credit and discount-code scenarios), Care refunds,
  * Flow triggers, shop info and marketing consent.
  */

@@ -19,7 +19,7 @@ import {
   creditTradeIn,
   receiveTradeIn,
   rejectTradeIn,
-} from "../services/trade_ins/workflow.server";
+} from "../services/trade-ins/workflow.server";
 
 async function findTradeIn(shopId: number, id: string | undefined) {
   return orNotFound(

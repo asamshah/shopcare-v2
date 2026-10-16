@@ -19,7 +19,7 @@ import {
   processRepairPayment,
   type PaidOrderBody,
 } from "../services/payments/repair-payment.server";
-import { linkTradeInsToOrder } from "../services/trade_ins/order-linker.server";
+import { linkTradeInsToOrder } from "../services/trade-ins/order-linker.server";
 import type { AdminGraphqlClient } from "../shopify/graphql.server";
 import { orderFromWebhook, type OrderWebhookBody } from "../shopify/orders.server";
 import { ProductFactsLoader } from "../shopify/product-facts.server";

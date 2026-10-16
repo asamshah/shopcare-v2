@@ -16,11 +16,11 @@ import {
   approveTradeIn,
   creditTradeIn,
   receiveTradeIn,
-} from "../../../app/services/trade_ins/workflow.server";
+} from "../../../app/services/trade-ins/workflow.server";
 import { flash, get, post, signInAs, statusOf } from "../../support/admin";
 import { buildProgram, createItemFor, createShop, createTradeInFor, daysAgo } from "../../support/factories";
 
-vi.mock("../../../app/services/trade_ins/workflow.server", () => ({
+vi.mock("../../../app/services/trade-ins/workflow.server", () => ({
   approveTradeIn: vi.fn(),
   rejectTradeIn: vi.fn(),
   cancelTradeIn: vi.fn(),

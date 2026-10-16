@@ -1,0 +1,38 @@
+# Shopify Flow trigger: fired when a trade-in changes status (requested,
+# approved — with the program's sending instructions — received, credited,
+# rejected).
+[[extensions]]
+name = "Trade-in status changed"
+uid = "b7fea990-2fb1-406c-f969-fba185037599672e65b6"
+type = "flow_trigger"
+handle = "shopcare-trade-in-status"
+description = "A customer's ShopCare trade-in moved to a new status."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "customer_reference"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Trade in number"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Status"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Product title"
+
+    [[settings.fields]]
+    type = "number_decimal"
+    key = "Credit"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Instructions"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Credit code"

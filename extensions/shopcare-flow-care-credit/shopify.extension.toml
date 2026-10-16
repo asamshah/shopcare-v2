@@ -1,0 +1,33 @@
+# Shopify Flow trigger: fired when an item with Care is refunded and the
+# customer is given a credit code for the plan's value instead of a refund.
+[[extensions]]
+name = "Care credit issued"
+uid = "36b08621-05a5-bf21-4efd-b094789305bb47d4c168"
+type = "flow_trigger"
+handle = "shopcare-care-credit"
+description = "A customer got a ShopCare credit code for a Care plan whose item was refunded."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "customer_reference"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Care plan"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Product title"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Credit code"
+
+    [[settings.fields]]
+    type = "number_decimal"
+    key = "Credit amount"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Credit expires"

@@ -55,7 +55,7 @@ module.exports = {
 
     // Typescript
     {
-      files: ["**/*.{ts,tsx}"],
+      files: ["**/*.{ts,tsx,mts}"],
       plugins: ["@typescript-eslint", "import"],
       parser: "@typescript-eslint/parser",
       settings: {
@@ -84,6 +84,9 @@ module.exports = {
         ".graphqlrc.{js,ts}",
         "shopify.server.{js,ts}",
         "**/*.server.{js,ts}",
+        "netlify/functions/**/*.{ts,mts}",
+        "test/**/*.ts",
+        "vitest.config.ts",
       ],
       env: {
         node: true,

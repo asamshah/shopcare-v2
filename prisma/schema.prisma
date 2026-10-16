@@ -2,33 +2,755 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" for local dev/CI; rhel-openssl-3.0.x for Netlify Functions
+  // (AWS Lambda, Amazon Linux 2023).
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 // Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+// Postgres everywhere: a local Docker container in dev/test, a service
+// container in CI, and Neon (via Netlify DB or directly) in production.
+// DATABASE_URL is the runtime URL (Neon's *pooled* endpoint in production);
+// DIRECT_URL is the unpooled endpoint that `prisma migrate` needs. Locally
+// both point at the same database.
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
+// Used by @shopify/shopify-app-session-storage-prisma. Domain models are
+// ported later (see docs/PORTING.md) once the Rails schema settles.
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+// ---------------------------------------------------------------------------
+// Domain models, ported from the Rails app's db/schema.rb (tag
+// rails-reference). Tables and columns keep the Rails snake_case names (@@map
+// / @map) so raw SQL and the hand-written indexes read like the original.
+//
+// Type mapping (see docs/PORTING.md > Schema notes):
+//   bigint id           Int autoincrement (int4)
+//   string / text       String (text)
+//   decimal(p, s)       Decimal @db.Decimal(p, s)
+//   jsonb               Json @db.JsonB
+//   datetime            DateTime (timestamp(3): JS dates have ms precision)
+//   Rails enum          String column; values and TS unions in app/models/*
+//   encrypts :x         x_ciphertext text (app/lib/encryption.server.ts)
+//   Active Storage      storage key + metadata columns (app/lib/storage.server.ts)
+// Rails `dependent:` maps to onDelete: destroy/delete_all → Cascade,
+// nullify → SetNull, restrict_with_error → NoAction, made DEFERRABLE INITIALLY
+// DEFERRED in the migration SQL so a cascading shop delete still works (the
+// model layer also refuses such deletes up front, like Rails).
+//
+// Indexes Prisma can't express are added by hand in the migration SQL:
+//   covers_care_line_unit (partial unique)
+//   items order line unit (partial unique)
+//   trade_ins_one_open_per_item (partial unique)
+//   product_groups (shop_id, lower(name)) (expression unique)
+// and the four NoAction foreign keys are altered to DEFERRABLE there too.
+// ---------------------------------------------------------------------------
+
+/// A shop that installed the app. Access tokens live in Session (keyed by
+/// domain); this row holds ShopCare's own per-shop settings and secrets.
+model Shop {
+  id                           Int       @id @default(autoincrement())
+  shopifyDomain                String    @unique(map: "index_shops_on_shopify_domain") @map("shopify_domain")
+  plan                         String    @default("free")
+  settings                     Json      @default("{}") @db.JsonB
+  installedAt                  DateTime? @map("installed_at")
+  uninstalledAt                DateTime? @map("uninstalled_at")
+  setupCompletedAt             DateTime? @map("setup_completed_at")
+  /// Encrypted (context "Shop.klaviyoApiKey").
+  klaviyoApiKeyCiphertext      String?   @map("klaviyo_api_key_ciphertext")
+  /// Encrypted (context "Shop.customerSigningKey").
+  customerSigningKeyCiphertext String?   @map("customer_signing_key_ciphertext")
+  /// Encrypted (context "Shop.webhookSecret"). Was settings["webhook_secret"] in Rails.
+  webhookSecretCiphertext      String?   @map("webhook_secret_ciphertext")
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @updatedAt @map("updated_at")
+
+  repairTickets          RepairTicket[]
+  items                  Item[]
+  covers                 Cover[]
+  registrations          Registration[]
+  warrantyPolicies       WarrantyPolicy[]
+  carePlans              CarePlan[]
+  productGroups          ProductGroup[]
+  repairServices         RepairService[]
+  parts                  Part[]
+  partImports            PartImport[]
+  stockMovements         StockMovement[]
+  careCredits            CareCredit[]
+  processedRefunds       ProcessedRefund[]
+  notificationDeliveries NotificationDelivery[]
+  emailSuppressions      EmailSuppression[]
+  tradeInPrograms        TradeInProgram[]
+  tradeIns               TradeIn[]
+
+  @@map("shops")
+}
+
+model CareCredit {
+  id                Int       @id @default(autoincrement())
+  shopId            Int       @map("shop_id")
+  coverId           Int       @unique(map: "index_care_credits_on_cover_id") @map("cover_id")
+  code              String
+  amount            Decimal   @db.Decimal(10, 2)
+  shopifyDiscountId String?   @map("shopify_discount_id")
+  expiresAt         DateTime? @map("expires_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  shop  Shop  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  cover Cover @relation(fields: [coverId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, code], map: "index_care_credits_on_shop_id_and_code")
+  @@map("care_credits")
+}
+
+model CarePlan {
+  id               Int      @id @default(autoincrement())
+  shopId           Int      @map("shop_id")
+  name             String
+  shopifyProductId String?  @map("shopify_product_id")
+  shopifyVariantId String   @map("shopify_variant_id")
+  price            Decimal  @default(0) @db.Decimal(10, 2)
+  termMonths       Int      @default(24) @map("term_months")
+  excess           Decimal  @default(0) @db.Decimal(10, 2)
+  exclusions       String?
+  perks            Json     @default("{}") @db.JsonB
+  offerWindowDays  Int      @default(30) @map("offer_window_days")
+  position         Int      @default(0)
+  active           Boolean  @default(true)
+  productGroupId   Int?     @map("product_group_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productGroup ProductGroup? @relation(fields: [productGroupId], references: [id], onDelete: NoAction)
+  covers       Cover[]
+
+  @@unique([shopId, shopifyVariantId], map: "index_care_plans_on_shop_id_and_shopify_variant_id")
+  @@index([productGroupId], map: "index_care_plans_on_product_group_id")
+  @@map("care_plans")
+}
+
+model Cover {
+  id                Int      @id @default(autoincrement())
+  shopId            Int      @map("shop_id")
+  itemId            Int      @map("item_id")
+  /// "warranty" | "care"
+  kind              String   @default("warranty")
+  warrantyPolicyId  Int?     @map("warranty_policy_id")
+  carePlanId        Int?     @map("care_plan_id")
+  startsAt          DateTime @map("starts_at")
+  endsAt            DateTime @map("ends_at")
+  /// "active" | "cancelled"
+  status            String   @default("active")
+  terms             Json     @default("{}") @db.JsonB
+  usage             Json     @default("{}") @db.JsonB
+  shopifyOrderId    String?  @map("shopify_order_id")
+  shopifyLineItemId String?  @map("shopify_line_item_id")
+  pricePaid         Decimal? @map("price_paid") @db.Decimal(10, 2)
+  lineUnitIndex     Int?     @map("line_unit_index")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  item           Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warrantyPolicy WarrantyPolicy? @relation(fields: [warrantyPolicyId], references: [id], onDelete: SetNull)
+  carePlan       CarePlan?       @relation(fields: [carePlanId], references: [id], onDelete: SetNull)
+  repairTickets  RepairTicket[]
+  quotations     Quotation[]
+  careCredits    CareCredit[]
+
+  // Partial unique index on (shop_id, shopify_line_item_id, line_unit_index)
+  // WHERE shopify_line_item_id IS NOT NULL: hand-written in the migration.
+  @@index([carePlanId], map: "index_covers_on_care_plan_id")
+  @@index([itemId], map: "index_covers_on_item_id")
+  @@index([warrantyPolicyId], map: "index_covers_on_warranty_policy_id")
+  @@map("covers")
+}
+
+model Item {
+  id                  Int       @id @default(autoincrement())
+  shopId              Int       @map("shop_id")
+  shopifyCustomerId   String?   @map("shopify_customer_id")
+  customerEmail       String?   @map("customer_email")
+  customerName        String?   @map("customer_name")
+  productId           String?   @map("product_id")
+  variantId           String?   @map("variant_id")
+  productTitle        String?   @map("product_title")
+  variantTitle        String?   @map("variant_title")
+  sku                 String?
+  orderId             String?   @map("order_id")
+  orderName           String?   @map("order_name")
+  orderLineId         String?   @map("order_line_id")
+  unitIndex           Int       @default(0) @map("unit_index")
+  purchasedAt         DateTime? @map("purchased_at")
+  /// "order" | "registration"
+  source              String    @default("order")
+  /// "active" | "refunded" | "void" | "traded_in"
+  status              String    @default("active")
+  properties          Json      @default("{}") @db.JsonB
+  eligibleCarePlanIds Json      @default("[]") @map("eligible_care_plan_ids") @db.JsonB
+  unitPrice           Decimal?  @map("unit_price") @db.Decimal(10, 2)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  shop          Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  covers        Cover[]
+  repairTickets RepairTicket[]
+  registration  Registration?
+  tradeIns      TradeIn[]
+
+  // Partial unique index on (shop_id, order_line_id, unit_index)
+  // WHERE order_line_id IS NOT NULL: hand-written in the migration.
+  @@index([shopId, createdAt], map: "index_items_on_shop_id_and_created_at")
+  @@index([shopId, shopifyCustomerId], map: "index_items_on_shop_id_and_shopify_customer_id")
+  @@map("items")
+}
+
+model NotificationDelivery {
+  id                Int      @id @default(autoincrement())
+  shopId            Int      @map("shop_id")
+  event             String
+  /// "email" | "staff_email" | "flow" | "klaviyo"
+  channel           String
+  /// "pending" | "sent" | "skipped" | "failed"
+  status            String   @default("pending")
+  payload           Json     @default("{}") @db.JsonB
+  /// The last error (Rails' `error`; v2's "last_error").
+  error             String?
+  /// v2: "<event>:<record id>", unique per shop and channel, so a duplicate
+  /// webhook or retry finds the existing delivery. Also sent to the provider.
+  idempotencyKey    String?  @map("idempotency_key")
+  /// v2: the email provider's message id.
+  providerMessageId String?  @map("provider_message_id")
+  /// v2: send attempts so far.
+  attempts          Int      @default(0)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, channel, idempotencyKey], map: "index_notification_deliveries_on_idempotency")
+  @@index([shopId, createdAt], map: "index_notification_deliveries_on_shop_id_and_created_at")
+  @@map("notification_deliveries")
+}
+
+model PartImport {
+  id        Int       @id @default(autoincrement())
+  shopId    Int       @map("shop_id")
+  filename  String
+  /// "parts" | "stock"
+  mode      String
+  csvData   String    @map("csv_data")
+  appliedAt DateTime? @map("applied_at")
+  summary   Json      @default("{}") @db.JsonB
+  createdBy String?   @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId], map: "index_part_imports_on_shop_id")
+  @@map("part_imports")
+}
+
+model PartVariant {
+  id        Int      @id @default(autoincrement())
+  partId    Int      @map("part_id")
+  options   Json     @default("{}") @db.JsonB
+  sku       String?
+  onHand    Decimal  @default(0) @map("on_hand") @db.Decimal(12, 3)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  part           Part            @relation(fields: [partId], references: [id], onDelete: Cascade)
+  stockMovements StockMovement[]
+  ticketParts    TicketPart[]
+
+  @@unique([partId, options], map: "index_part_variants_on_part_id_and_options")
+  @@map("part_variants")
+}
+
+model Part {
+  id              Int      @id @default(autoincrement())
+  shopId          Int      @map("shop_id")
+  name            String
+  sku             String?
+  /// "each" | "pair" | "metre" | "ml" | "g"
+  unit            String   @default("each")
+  packSize        Decimal  @default(1) @map("pack_size") @db.Decimal(12, 3)
+  costPerUnit     Decimal  @default(0) @map("cost_per_unit") @db.Decimal(12, 4)
+  reorderLevel    Decimal  @default(0) @map("reorder_level") @db.Decimal(12, 3)
+  reorderQuantity Decimal  @default(0) @map("reorder_quantity") @db.Decimal(12, 3)
+  optionNames     Json     @default("[]") @map("option_names") @db.JsonB
+  notes           String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  shop              Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants          PartVariant[]
+  serviceComponents ServiceComponent[]
+  ticketParts       TicketPart[]
+
+  @@index([shopId], map: "index_parts_on_shop_id")
+  @@map("parts")
+}
+
+model ProcessedRefund {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  refundId  String   @map("refund_id")
+  orderId   String?  @map("order_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, refundId], map: "index_processed_refunds_on_shop_id_and_refund_id")
+  @@map("processed_refunds")
+}
+
+model ProductGroup {
+  id          Int      @id @default(autoincrement())
+  shopId      Int      @map("shop_id")
+  name        String
+  /// "all" | "collections" | "tags" | "product_type"
+  rule        String   @default("all")
+  /// [{ "id": "gid://shopify/Collection/1", "title": "Sale" }]
+  collections Json     @default("[]") @db.JsonB
+  tags        Json     @default("[]") @db.JsonB
+  productType String?  @map("product_type")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  shop             Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  carePlans        CarePlan[]
+  warrantyPolicies WarrantyPolicy[]
+
+  // Unique index on (shop_id, lower(name)): hand-written in the migration.
+  @@map("product_groups")
+}
+
+model QuotationLineItem {
+  id               Int      @id @default(autoincrement())
+  quotationId      Int      @map("quotation_id")
+  /// "repair" | "extra"
+  kind             String   @default("repair")
+  title            String
+  quantity         Int      @default(1)
+  unitPrice        Decimal  @default(0) @map("unit_price") @db.Decimal(10, 2)
+  discount         Decimal  @default(0) @db.Decimal(10, 2)
+  coverDiscount    Decimal  @default(0) @map("cover_discount") @db.Decimal(10, 2)
+  shopifyProductId String?  @map("shopify_product_id")
+  shopifyVariantId String?  @map("shopify_variant_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId], map: "index_quotation_line_items_on_quotation_id")
+  @@map("quotation_line_items")
+}
+
+model Quotation {
+  id                      Int       @id @default(autoincrement())
+  repairTicketId          Int       @map("repair_ticket_id")
+  /// "draft" | "sent" | "paid" | "declined" | "expired" | "cancelled"
+  status                  String    @default("draft")
+  currency                String?
+  subtotal                Decimal   @default(0) @db.Decimal(10, 2)
+  shopifyDraftOrderId     String?   @map("shopify_draft_order_id")
+  shopifyDraftOrderUrl    String?   @map("shopify_draft_order_url")
+  shopifyOrderId          String?   @map("shopify_order_id")
+  sentAt                  DateTime? @map("sent_at")
+  paidAt                  DateTime? @map("paid_at")
+  coverId                 Int?      @map("cover_id")
+  coverDiscountPercent    Decimal   @default(0) @map("cover_discount_percent") @db.Decimal(5, 2)
+  coverDiscount           Decimal   @default(0) @map("cover_discount") @db.Decimal(10, 2)
+  coverExcess             Decimal   @default(0) @map("cover_excess") @db.Decimal(10, 2)
+  /// SHA-256 hex of the review-link token, for lookup.
+  decisionTokenDigest     String?   @unique(map: "index_quotations_on_decision_token_digest") @map("decision_token_digest")
+  /// The token itself, encrypted (context "Quotation.decisionToken"), to
+  /// rebuild the link and compare in constant time.
+  decisionTokenCiphertext String?   @map("decision_token_ciphertext")
+  decisionExpiresAt       DateTime? @map("decision_expires_at")
+  decidedAt               DateTime? @map("decided_at")
+  /// "customer" | "staff" | "system"
+  decidedBy               String?   @map("decided_by")
+  decisionReason          String?   @map("decision_reason")
+  revisedFromId           Int?      @map("revised_from_id")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  repairTicket RepairTicket        @relation(fields: [repairTicketId], references: [id], onDelete: Cascade)
+  cover        Cover?              @relation(fields: [coverId], references: [id], onDelete: SetNull)
+  revisedFrom  Quotation?          @relation("QuotationRevisions", fields: [revisedFromId], references: [id], onDelete: SetNull)
+  revisions    Quotation[]         @relation("QuotationRevisions")
+  lineItems    QuotationLineItem[]
+
+  @@index([coverId], map: "index_quotations_on_cover_id")
+  @@index([repairTicketId, createdAt], map: "index_quotations_on_repair_ticket_id_and_created_at")
+  @@index([shopifyDraftOrderId], map: "index_quotations_on_shopify_draft_order_id")
+  @@index([shopifyOrderId], map: "index_quotations_on_shopify_order_id")
+  @@index([status, decisionExpiresAt], map: "index_quotations_on_status_and_decision_expires_at")
+  @@map("quotations")
+}
+
+model Registration {
+  id               Int       @id @default(autoincrement())
+  shopId           Int       @map("shop_id")
+  itemId           Int       @unique(map: "index_registrations_on_item_id") @map("item_id")
+  retailer         String?
+  /// "unverified" | "verified" | "rejected"
+  status           String    @default("unverified")
+  reviewedAt       DateTime? @map("reviewed_at")
+  reviewNote       String?   @map("review_note")
+  /// Proof of purchase (was `has_one_attached :proof`).
+  proofKey         String?   @map("proof_key")
+  proofFilename    String?   @map("proof_filename")
+  proofContentType String?   @map("proof_content_type")
+  proofByteSize    Int?      @map("proof_byte_size")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status], map: "index_registrations_on_shop_id_and_status")
+  @@map("registrations")
+}
+
+model RepairService {
+  id               Int      @id @default(autoincrement())
+  shopId           Int      @map("shop_id")
+  title            String
+  shopifyProductId String?  @map("shopify_product_id")
+  shopifyVariantId String   @map("shopify_variant_id")
+  price            Decimal  @default(0) @db.Decimal(10, 2)
+  labourMinutes    Int      @default(0) @map("labour_minutes")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  shop        Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  components  ServiceComponent[]
+  ticketParts TicketPart[]
+
+  @@unique([shopId, shopifyVariantId], map: "index_repair_services_on_shop_id_and_shopify_variant_id")
+  @@map("repair_services")
+}
+
+model RepairTicket {
+  id                Int       @id @default(autoincrement())
+  shopId            Int       @map("shop_id")
+  shopifyCustomerId String?   @map("shopify_customer_id")
+  customerEmail     String?   @map("customer_email")
+  customerName      String?   @map("customer_name")
+  customerPhone     String?   @map("customer_phone")
+  customerAddress   Json      @default("{}") @map("customer_address") @db.JsonB
+  productId         String?   @map("product_id")
+  variantId         String?   @map("variant_id")
+  productTitle      String?   @map("product_title")
+  variantTitle      String?   @map("variant_title")
+  orderNumber       String?   @map("order_number")
+  orderDate         DateTime? @map("order_date")
+  inWarranty        Boolean   @default(false) @map("in_warranty")
+  noOrderHistory    Boolean   @default(false) @map("no_order_history")
+  description       String?
+  /// See RepairTicketStatus in app/models/repair-ticket.server.ts.
+  status            String    @default("new")
+  assignedTo        String?   @map("assigned_to")
+  itemId            Int?      @map("item_id")
+  coverId           Int?      @map("cover_id")
+  costs             Json      @default("{}") @db.JsonB
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  shop           Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  item           Item?            @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  cover          Cover?           @relation(fields: [coverId], references: [id], onDelete: SetNull)
+  ticketImages   TicketImage[]
+  quotations     Quotation[]
+  ticketParts    TicketPart[]
+  stockMovements StockMovement[]
+  activities     TicketActivity[]
+
+  @@index([coverId], map: "index_repair_tickets_on_cover_id")
+  @@index([itemId], map: "index_repair_tickets_on_item_id")
+  @@index([shopId, createdAt], map: "index_repair_tickets_on_shop_id_and_created_at")
+  @@index([shopId, shopifyCustomerId], map: "index_repair_tickets_on_shop_id_and_shopify_customer_id")
+  @@index([shopId, status], map: "index_repair_tickets_on_shop_id_and_status")
+  @@map("repair_tickets")
+}
+
+model ServiceComponent {
+  id              Int      @id @default(autoincrement())
+  repairServiceId Int      @map("repair_service_id")
+  partId          Int      @map("part_id")
+  quantity        Decimal  @default(1) @db.Decimal(12, 3)
+  /// Per option: "item" | "any" | "fixed:<value>"
+  match           Json     @default("{}") @db.JsonB
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  repairService RepairService @relation(fields: [repairServiceId], references: [id], onDelete: Cascade)
+  part          Part          @relation(fields: [partId], references: [id], onDelete: Cascade)
+
+  @@index([partId], map: "index_service_components_on_part_id")
+  @@index([repairServiceId], map: "index_service_components_on_repair_service_id")
+  @@map("service_components")
+}
+
+model StockMovement {
+  id             Int      @id @default(autoincrement())
+  shopId         Int      @map("shop_id")
+  partVariantId  Int      @map("part_variant_id")
+  quantity       Decimal  @db.Decimal(12, 3)
+  /// "received" | "consumed" | "adjusted" | "stock_count"
+  reason         String
+  repairTicketId Int?     @map("repair_ticket_id")
+  unitCost       Decimal? @map("unit_cost") @db.Decimal(12, 4)
+  note           String?
+  createdBy      String?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  partVariant  PartVariant   @relation(fields: [partVariantId], references: [id], onDelete: Cascade)
+  repairTicket RepairTicket? @relation(fields: [repairTicketId], references: [id], onDelete: SetNull)
+
+  @@index([partVariantId], map: "index_stock_movements_on_part_variant_id")
+  @@index([repairTicketId], map: "index_stock_movements_on_repair_ticket_id")
+  @@index([shopId, createdAt], map: "index_stock_movements_on_shop_id_and_created_at")
+  @@map("stock_movements")
+}
+
+model TicketActivity {
+  id             Int      @id @default(autoincrement())
+  repairTicketId Int      @map("repair_ticket_id")
+  /// "note" | "status_change" | "quote_sent" | "quote_decision" | "payment" | "system"
+  activityType   String   @map("activity_type")
+  body           String?
+  /// "staff" | "system" | "customer"
+  author         String   @default("staff")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  repairTicket RepairTicket @relation(fields: [repairTicketId], references: [id], onDelete: Cascade)
+
+  @@index([repairTicketId, createdAt], map: "index_ticket_activities_on_repair_ticket_id_and_created_at")
+  @@map("ticket_activities")
+}
+
+model TicketImage {
+  id             Int      @id @default(autoincrement())
+  repairTicketId Int      @map("repair_ticket_id")
+  /// An external image (optional); uploads use storageKey.
+  url            String?
+  /// Uploaded photo (was `has_one_attached :file`).
+  storageKey     String?  @map("storage_key")
+  filename       String?
+  contentType    String?  @map("content_type")
+  byteSize       Int?     @map("byte_size")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  repairTicket RepairTicket @relation(fields: [repairTicketId], references: [id], onDelete: Cascade)
+
+  @@index([repairTicketId], map: "index_ticket_images_on_repair_ticket_id")
+  @@map("ticket_images")
+}
+
+model TicketPart {
+  id              Int       @id @default(autoincrement())
+  repairTicketId  Int       @map("repair_ticket_id")
+  partId          Int       @map("part_id")
+  partVariantId   Int?      @map("part_variant_id")
+  repairServiceId Int?      @map("repair_service_id")
+  quantity        Decimal   @default(1) @db.Decimal(12, 3)
+  unitCost        Decimal?  @map("unit_cost") @db.Decimal(12, 4)
+  consumedAt      DateTime? @map("consumed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  repairTicket  RepairTicket   @relation(fields: [repairTicketId], references: [id], onDelete: Cascade)
+  part          Part           @relation(fields: [partId], references: [id], onDelete: NoAction)
+  partVariant   PartVariant?   @relation(fields: [partVariantId], references: [id], onDelete: NoAction)
+  repairService RepairService? @relation(fields: [repairServiceId], references: [id], onDelete: SetNull)
+
+  @@index([partId], map: "index_ticket_parts_on_part_id")
+  @@index([partVariantId], map: "index_ticket_parts_on_part_variant_id")
+  @@index([repairServiceId], map: "index_ticket_parts_on_repair_service_id")
+  @@index([repairTicketId], map: "index_ticket_parts_on_repair_ticket_id")
+  @@map("ticket_parts")
+}
+
+/// Trade-in is parked for V2 (docs/ROADMAP.md); the tables are kept.
+model TradeInProgram {
+  id           Int      @id @default(autoincrement())
+  shopId       Int      @map("shop_id")
+  name         String
+  eligibility  Json     @default("{\"mode\": \"all\"}") @db.JsonB
+  /// "fixed" | "percent"
+  creditMode   String   @default("fixed") @map("credit_mode")
+  grades       Json     @default("[]") @db.JsonB
+  maxAgeMonths Int?     @map("max_age_months")
+  instructions String?
+  position     Int      @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  shop     Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  tradeIns TradeIn[]
+
+  @@index([shopId, position], map: "index_trade_in_programs_on_shop_id_and_position")
+  @@map("trade_in_programs")
+}
+
+model TradeIn {
+  id                Int       @id @default(autoincrement())
+  shopId            Int       @map("shop_id")
+  tradeInProgramId  Int?      @map("trade_in_program_id")
+  itemId            Int?      @map("item_id")
+  shopifyCustomerId String?   @map("shopify_customer_id")
+  customerEmail     String?   @map("customer_email")
+  customerName      String?   @map("customer_name")
+  productTitle      String    @map("product_title")
+  description       String?
+  /// "pdp" | "form"
+  source            String    @default("form")
+  /// See TradeInStatus in app/models/trade-in.server.ts.
+  status            String    @default("requested")
+  declaredGrade     String?   @map("declared_grade")
+  quotedCredit      Decimal   @default(0) @map("quoted_credit") @db.Decimal(10, 2)
+  finalGrade        String?   @map("final_grade")
+  finalCredit       Decimal?  @map("final_credit") @db.Decimal(10, 2)
+  currency          String?
+  shopifyOrderId    String?   @map("shopify_order_id")
+  orderName         String?   @map("order_name")
+  creditMethod      String?   @map("credit_method")
+  creditReference   String?   @map("credit_reference")
+  creditedAt        DateTime? @map("credited_at")
+  staffNote         String?   @map("staff_note")
+  /// Photos (was `has_many_attached :photos`): [{ key, filename, contentType, byteSize }].
+  photos            Json      @default("[]") @db.JsonB
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  tradeInProgram TradeInProgram? @relation(fields: [tradeInProgramId], references: [id], onDelete: SetNull)
+  item           Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  // Partial unique index on item_id WHERE item_id IS NOT NULL AND status is
+  // open: hand-written in the migration.
+  @@index([itemId], map: "index_trade_ins_on_item_id")
+  @@index([shopId, shopifyCustomerId], map: "index_trade_ins_on_shop_id_and_shopify_customer_id")
+  @@index([shopId, status, createdAt], map: "index_trade_ins_on_shop_id_and_status_and_created_at")
+  @@index([tradeInProgramId], map: "index_trade_ins_on_trade_in_program_id")
+  @@map("trade_ins")
+}
+
+model WarrantyPolicy {
+  id              Int      @id @default(autoincrement())
+  shopId          Int      @map("shop_id")
+  name            String
+  months          Int      @default(12)
+  /// "free" | "discount"
+  outcome         String   @default("free")
+  discountPercent Decimal  @default(100) @map("discount_percent") @db.Decimal(5, 2)
+  coveredFaults   String?  @map("covered_faults")
+  position        Int      @default(0)
+  active          Boolean  @default(true)
+  productGroupId  Int?     @map("product_group_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productGroup ProductGroup? @relation(fields: [productGroupId], references: [id], onDelete: NoAction)
+  covers       Cover[]
+
+  @@index([productGroupId], map: "index_warranty_policies_on_product_group_id")
+  @@index([shopId], map: "index_warranty_policies_on_shop_id")
+  @@map("warranty_policies")
+}
+
+// ---------------------------------------------------------------------------
+// v2 infrastructure tables (no Rails counterpart: Rails kept these in
+// Rails.cache). Both are pruned daily by netlify/functions/daily-prune.mts.
+// ---------------------------------------------------------------------------
+
+/// Fixed-window counters for App Proxy throttling
+/// (app/lib/proxy-throttling.server.ts, postgresThrottleStore). One row per
+/// endpoint + shop + scope, reset in place each window.
+model ProxyThrottle {
+  /// "<endpoint>/<shop domain>/ip:<ip>" or "<endpoint>/<shop domain>/shop"
+  key         String   @id
+  windowStart DateTime @map("window_start") @db.Timestamptz(6)
+  count       Int
+
+  @@index([windowStart])
+  @@map("proxy_throttles")
+}
+
+/// Shared TTL cache for Shopify reads (product facts, catalogue search,
+/// repair products): app/lib/postgres-cache.server.ts. Shared by every
+/// function instance; expired rows are ignored on read and pruned daily.
+model CacheEntry {
+  key       String   @id
+  value     Json     @db.JsonB
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("cache_entries")
+}
+
+// v2 (w2-backend): addresses ShopCare must not email. Bounces are global
+// (shop_id NULL, scope_key "global"); unsubscribes and complaints are per shop
+// (scope_key "shop:<id>"). The address is stored only as a SHA-256 digest of
+// its lower-cased form, so the list holds no readable personal data and
+// survives customers/redact. `kind`: "marketing" blocks marketing email only,
+// "all" blocks every email to the address.
+model EmailSuppression {
+  id          Int      @id @default(autoincrement())
+  shopId      Int?     @map("shop_id")
+  scopeKey    String   @map("scope_key")
+  emailDigest String   @map("email_digest")
+  kind        String
+  reason      String
+  detail      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([scopeKey, emailDigest, kind], map: "index_email_suppressions_on_scope_digest_kind")
+  @@index([emailDigest], map: "index_email_suppressions_on_email_digest")
+  @@map("email_suppressions")
 }

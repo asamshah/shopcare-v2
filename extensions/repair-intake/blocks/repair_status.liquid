@@ -1,0 +1,43 @@
+{%- comment -%}
+  Repair status — for logged-in customers: their repair requests and where each
+  one is. A sent quote awaiting payment shows "Quote ready – review & pay",
+  linking to its review page (Pay now, or decline).
+{%- endcomment -%}
+
+{%- capture customer_query -%}{% render 'shopcare_customer_query', customer: customer, app: app %}{%- endcapture -%}
+<div
+  class="shopcare shopcare--status"
+  data-repair-status-list
+  data-status-url="/apps/repairs/status{% if customer_query != blank %}?{{ customer_query | escape }}{% endif %}"
+  {{ block.shopify_attributes }}
+>
+  {%- if block.settings.heading != blank -%}
+    <h2 class="shopcare__title">{{ block.settings.heading }}</h2>
+  {%- endif -%}
+
+  {%- if customer -%}
+    <p class="shopcare__hint" data-status-loading>Loading your repairs…</p>
+    <p class="shopcare__hint" data-status-empty hidden>{{ block.settings.empty_text }}</p>
+    <div class="shopcare__list" data-status-list></div>
+  {%- else -%}
+    <p>
+      <a href="{{ routes.account_login_url }}">{{ block.settings.login_text }}</a>
+    </p>
+  {%- endif -%}
+  <p class="shopcare__error" data-shopcare-error role="alert" hidden></p>
+</div>
+
+
+{% schema %}
+{
+  "name": "Repair status",
+  "target": "section",
+  "stylesheet": "shopcare.css",
+  "javascript": "shopcare-pdp.js",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Your repairs" },
+    { "type": "text", "id": "empty_text", "label": "No repairs message", "default": "You haven't asked us for a repair yet." },
+    { "type": "text", "id": "login_text", "label": "Log in prompt", "default": "Log in to see your repairs." }
+  ]
+}
+{% endschema %}

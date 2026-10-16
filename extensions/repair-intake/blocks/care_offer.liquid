@@ -1,0 +1,60 @@
+{%- comment -%}
+  Care — product page section, laid out after Apple's coverage picker: a
+  headline, one card per Care plan (name, what it covers, price, benefits and
+  a "What's covered" panel with the plan's terms), and a "No coverage" card.
+  Colours and fonts come from the theme. The chosen plan is added with the
+  product as a nested cart line (Shopify removes it with the product), tagged
+  _shopcare_for so the cover attaches to the right item.
+{%- endcomment -%}
+
+{%- if product -%}
+<div
+  class="shopcare-pdp"
+  data-care-offer
+  data-plans-url="/apps/repairs/care_plans?product_id={{ product.id }}&product_title={{ product.title | url_encode }}"
+  data-cart-add-url="{{ routes.cart_add_url }}.js"
+  data-cart-url="{{ routes.cart_url }}"
+  data-cart-change-url="{{ routes.cart_change_url }}.js"
+  data-product-title="{{ product.title | escape }}"
+  data-subtitle="{{ block.settings.subtitle | escape }}"
+  data-price-suffix="{{ block.settings.price_suffix | escape }}"
+  data-decline-label="{{ block.settings.decline_label | escape }}"
+  data-terms-label="{{ block.settings.terms_label | escape }}"
+  {%- if block.settings.accent_color != blank %} style="--shopcare-accent-setting: {{ block.settings.accent_color }};"{% endif %}
+  aria-busy="true"
+  {{ block.shopify_attributes }}
+>
+  <h3 class="shopcare-pdp__title">
+    <span class="shopcare-pdp__title-strong">{{ block.settings.heading }}</span>
+    <span class="shopcare-pdp__title-muted">{{ block.settings.tagline }}</span>
+  </h3>
+  <div class="shopcare-pdp__choices" role="radiogroup" aria-label="{{ block.settings.heading | escape }}" data-care-options>
+    {%- comment -%} Placeholders the size of a plan card and the no-thanks card, so
+      the page doesn't jump when the plans arrive. Removed (with the whole block,
+      if the product has no plans) by shopcare-pdp.js. {%- endcomment -%}
+    <div class="shopcare-pdp__skeleton" aria-hidden="true"></div>
+    <div class="shopcare-pdp__skeleton shopcare-pdp__skeleton--short" aria-hidden="true"></div>
+  </div>
+  <p class="shopcare-pdp__error" data-shopcare-error role="alert" hidden></p>
+</div>
+
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Care offer",
+  "target": "section",
+  "stylesheet": "shopcare.css",
+  "javascript": "shopcare-pdp.js",
+  "enabled_on": { "templates": ["product"] },
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Care coverage." },
+    { "type": "text", "id": "tagline", "label": "Tagline", "default": "Peace of mind in every plan." },
+    { "type": "text", "id": "subtitle", "label": "Plan subtitle", "info": "{months} and {product} are replaced.", "default": "Cover this product for {months} months" },
+    { "type": "text", "id": "price_suffix", "label": "Price suffix", "default": "one-off" },
+    { "type": "text", "id": "decline_label", "label": "No-thanks card", "default": "No Care coverage" },
+    { "type": "text", "id": "terms_label", "label": "Terms heading", "info": "Opens the plan's terms, generated from its settings in ShopCare.", "default": "What's covered" },
+    { "type": "color", "id": "accent_color", "label": "Selected colour", "info": "Optional. Leave blank to use your theme's button colour." }
+  ]
+}
+{% endschema %}

@@ -1,61 +1,91 @@
-# This file stores configurations for your Shopify app.
+# ShopCare v2: Shopify app configuration used by the Shopify CLI.
+# Docs: https://shopify.dev/docs/apps/build/cli-for-apps/app-configuration
+#
+# Translated from the Rails app's shopify.app.toml and
+# config/initializers/shopify_app.rb (tag `rails-reference`).
+#
+# client_id is left blank on purpose. Run `npm run config:link` and pick either
+# the existing ShopCare app (keeps installs, and the extension uids in
+# extensions/*/shopify.extension.toml already belong to it) or a separate dev
+# app. `shopify app dev` then fills in the URLs below with the tunnel; for
+# production, set them to the Netlify site URL.
 client_id = ""
+name = "ShopCare"
+application_url = "https://example.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
 
 [access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products"
+# Same scopes as the Rails app:
+# read_products       repair-product picker (filtered by collection/tag)
+# write_customers     customer PII on tickets (protected customer data); v2
+#                     also records an unsubscribe from ShopCare's marketing
+#                     email in Shopify (customerEmailMarketingConsentUpdate)
+# read_orders         order history / warranty lookups (last 60 days)
+# write_draft_orders  build, invoice & complete the quote draft order
+# write_orders        refund a Care plan when its item is refunded
+# write_discounts     credit codes offered instead of a Care refund
+# write_store_credit_account_transactions  trade-in credit as store credit
+# Full purchase history needs `read_all_orders`, which Shopify gates. Request
+# approval in the Partner dashboard before adding it.
+scopes = "read_products,write_customers,read_orders,write_draft_orders,write_orders,write_discounts,write_store_credit_account_transactions"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://example.com/auth/callback" ]
 
 [webhooks]
+# Rails pinned 2025-10. v2 uses the template's version (shopify.server.ts,
+# ApiVersion.October26), so check payloads against 2026-10 as handlers are ported.
 api_version = "2026-10"
+
+  # The Rails app registered these per shop at runtime via the shopify_app gem.
+  # Here they're app-specific subscriptions, managed by `shopify app deploy`.
 
   # Handled by: /app/routes/webhooks.app.uninstalled.tsx
   [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
   uri = "/webhooks/app/uninstalled"
-  topics = ["app/uninstalled"]
 
   # Handled by: /app/routes/webhooks.app.scopes_update.tsx
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
-  # Mandatory compliance topic for public apps only
-  # See: https://shopify.dev/docs/apps/build/privacy-law-compliance
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/customers/data_request"
-  # compliance_topics = ["customers/data_request"]
+  # Repair payment: confirms the quote was paid and starts the repair.
+  # Handled by: /app/routes/webhooks.orders.paid.tsx → `webhook` job
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
 
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/customers/redact"
-  # compliance_topics = ["customers/redact"]
+  # Refunded units lose their Item's cover; refunded Care plans are cancelled.
+  # Handled by: /app/routes/webhooks.refunds.create.tsx → `webhook` job
+  [[webhooks.subscriptions]]
+  topics = [ "refunds/create" ]
+  uri = "/webhooks/refunds/create"
 
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/shop/redact"
-  # compliance_topics = ["shop/redact"]
+  # Mandatory privacy/compliance webhooks.
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request" ]
+  uri = "/webhooks/customers/data_request"
 
-# Only receive Events when a variant's price changes and the product status is active.
-# See: https://shopify.dev/docs/apps/build/events-webhooks
-# [events]
-# api_version = "2026-10"
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/redact" ]
+  uri = "/webhooks/customers/redact"
 
-#   [[events.subscription]]
-#   handle = "product-price-change"
-#   topic = "Product"
-#   actions = ["update"]
-#   triggers = ["product.variants.price", "product.variants.compareAtPrice"]
-#   uri = "/webhooks/products/update"
-#   query = """
-#   query product_variant_price_change($productId: ID!, $variantsId: ID!) {
-#     product(id: $productId) {
-#       id
-#       title
-#       status
-#     }
-#     productVariant(id: $variantsId) {
-#       id
-#       title
-#       price
-#       compareAtPrice
-#     }
-#   }
-#   """
-#   query_filter = "product.status:'ACTIVE'"
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "shop/redact" ]
+  uri = "/webhooks/shop/redact"
+
+[app_proxy]
+# Storefront /apps/repairs/* → this app's /proxy/*. Keep the same prefix and
+# subpath as the Rails app so the theme extension's URLs still work.
+url = "https://example.com/proxy"
+subpath = "repairs"
+prefix = "apps"
+
+[pos]
+embedded = false

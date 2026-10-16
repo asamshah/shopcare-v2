@@ -1,0 +1,25 @@
+# Shopify Flow trigger: fired when a customer's Care plan starts (after the
+# order is paid). Use it to send the Care confirmation email.
+[[extensions]]
+name = "Care plan activated"
+uid = "59591bb2-9f85-9f94-b9a4-d8c6e5eb1b91a271ddc5"
+type = "flow_trigger"
+handle = "shopcare-care-activated"
+description = "A customer's ShopCare Care plan has started."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "customer_reference"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Care plan"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Product title"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Cover ends"

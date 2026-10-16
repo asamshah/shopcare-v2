@@ -1,0 +1,244 @@
+{%- comment -%}
+  The repair request form. Used by the "Repair request" block and its
+  app-embed button.
+    Step 1: the product
+      logged out: log in to see your orders, or continue without an account
+      logged in: their profile and products (purchases + registered), each
+      with its cover; an item with a repair already open can't be chosen
+      everyone: "Find the product you bought" (name, SKU or order number;
+      guests verify an order with its email), or describe it
+    Step 2: describe the issue, add photos
+    Step 3: contact details (prefilled when logged in), then submit →
+      confirmation with a status tracker
+  Submits to the signed App Proxy; a logged-in customer's proxy URLs carry
+  their signed token (shopcare_customer_query). Pass `block` (settings:
+  heading, confirmation_text, collect_address, max_images, status_url),
+  `customer` and `app`.
+{%- endcomment -%}
+
+{%- assign uid = block.id | default: 'form' -%}
+{%- assign address = customer.default_address -%}
+{%- capture customer_query -%}{% render 'shopcare_customer_query', customer: customer, app: app %}{%- endcapture -%}
+<div
+  class="repair-intake"
+  data-repair-intake
+  data-intake-url="/apps/repairs/intake{% if customer_query != blank %}?{{ customer_query | escape }}{% endif %}"
+  data-orders-url="/apps/repairs/orders{% if customer_query != blank %}?{{ customer_query | escape }}{% endif %}"
+  data-catalog-url="/apps/repairs/catalog_search"
+  data-lookup-url="/apps/repairs/order_lookup{% if customer_query != blank %}?{{ customer_query | escape }}{% endif %}"
+  data-logged-in="{% if customer %}true{% else %}false{% endif %}"
+  data-max-images="{{ block.settings.max_images | default: 6 }}"
+>
+  {%- if block.settings.heading != blank -%}
+    <h2 class="repair-intake__heading">{{ block.settings.heading }}</h2>
+  {%- endif -%}
+
+  <ol class="repair-intake__steps" data-stepper aria-hidden="true">
+    <li class="repair-intake__step" data-step-indicator="1">Your product</li>
+    <li class="repair-intake__step" data-step-indicator="2">The issue</li>
+    <li class="repair-intake__step" data-step-indicator="3">Your details</li>
+  </ol>
+
+  <form class="repair-intake__form" data-repair-form>
+    {%- comment -%} ───────── Step 1: the product ───────── {%- endcomment -%}
+    <section class="repair-intake__panel" data-step="1" hidden>
+      {%- if customer -%}
+        <div class="repair-intake__profile" data-profile>
+          <strong>{{ customer.name | default: customer.email }}</strong>
+          <span class="repair-intake__hint">{{ customer.email }}</span>
+          {%- if address -%}
+            <span class="repair-intake__hint" data-profile-address>
+              {{- address.address1 }}{% if address.city != blank %}, {{ address.city }}{% endif %}{% if address.zip != blank %}, {{ address.zip }}{% endif %}{% if address.country != blank %}, {{ address.country }}{% endif -%}
+            </span>
+          {%- endif -%}
+        </div>
+
+        <div class="repair-intake__history" data-history>
+          <h3 class="repair-intake__subheading">Your products</h3>
+          <p class="repair-intake__hint" data-history-loading>Loading your products…</p>
+          <p class="repair-intake__hint" data-history-empty hidden>We couldn't find any products on your account. Search for yours below.</p>
+          <div class="repair-intake__grid" data-history-grid hidden></div>
+          <button type="button" class="button button--secondary repair-intake__secondary" data-history-more hidden>Show more</button>
+        </div>
+      {%- else -%}
+        <div class="repair-intake__start" data-start>
+          <p>Bought it from us online? Log in and choose it from your orders.</p>
+          <div class="repair-intake__choices">
+            {%- if shop.customer_accounts_enabled -%}
+              {%- assign back = request.path | default: '/' | url_encode -%}
+              <a class="button repair-intake__choice" data-login-link
+                href="{{ routes.account_login_url }}?return_url={{ back }}&return_to={{ back }}">Log in to see your orders</a>
+            {%- endif -%}
+            <button type="button" class="button button--secondary repair-intake__choice" data-continue-guest>Continue without an account</button>
+          </div>
+        </div>
+      {%- endif -%}
+
+      <div class="repair-intake__find" data-find {% unless customer %}hidden{% endunless %}>
+        <h3 class="repair-intake__subheading">{% if customer %}Can't see it? {% endif %}Find the product you bought</h3>
+        <label class="repair-intake__label" for="RepairFind-{{ uid }}">
+          <span>Product name, SKU or order number</span>
+        </label>
+        <input type="text" id="RepairFind-{{ uid }}" data-find-input autocomplete="off"
+          role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="RepairFindList-{{ uid }}"
+          placeholder="e.g. Aria boot, ARIA-8 or #1042">
+        <ul class="repair-intake__listbox" id="RepairFindList-{{ uid }}" role="listbox" aria-label="Matching products" data-find-list hidden></ul>
+        <p class="repair-intake__sr-only" aria-live="polite" data-find-count></p>
+
+        <div class="repair-intake__lookup" data-lookup hidden>
+          {%- unless customer -%}
+            <label class="repair-intake__label">
+              <span>Email used for order <span data-lookup-order></span></span>
+              <input type="email" data-lookup-email autocomplete="email">
+            </label>
+          {%- endunless -%}
+          <button type="button" class="button button--secondary repair-intake__secondary" data-lookup-submit>Find my order</button>
+        </div>
+        <div class="repair-intake__grid" data-lookup-grid hidden></div>
+
+        <button type="button" class="link repair-intake__link" data-manual-link>I can't find it: describe it instead</button>
+      </div>
+
+      <div class="repair-intake__selected" data-selected hidden>
+        <img class="repair-intake__selected-img" data-selected-image alt="" width="56" height="56">
+        <div class="repair-intake__selected-meta">
+          <strong data-selected-title></strong>
+          <span class="repair-intake__hint" data-selected-order></span>
+          <span class="repair-intake__badge" data-selected-cover hidden></span>
+          <small class="repair-intake__hint" data-selected-cover-note hidden></small>
+          <label class="repair-intake__label" data-variant-pick hidden>
+            <span>Which one? (optional)</span>
+            <select data-variant-select></select>
+          </label>
+        </div>
+        <button type="button" class="link repair-intake__link" data-change-product>Change</button>
+      </div>
+
+      <div class="repair-intake__manual" data-manual-fields hidden>
+        <label class="repair-intake__label">
+          <span>Product</span>
+          <input type="text" data-f-product-title placeholder="Which item is it?">
+        </label>
+        <div class="repair-intake__row">
+          <label class="repair-intake__label">
+            <span>Order number</span>
+            <input type="text" data-f-order-number placeholder="#1234">
+          </label>
+          <label class="repair-intake__checkbox repair-intake__checkbox--inline">
+            <input type="checkbox" data-f-no-history>
+            I don't have an order number (in-store or gift)
+          </label>
+        </div>
+      </div>
+
+      <input type="hidden" name="product_id" data-h-product-id>
+      <input type="hidden" name="variant_id" data-h-variant-id>
+      <input type="hidden" name="product_title" data-h-product-title>
+      <input type="hidden" name="variant_title" data-h-variant-title>
+      <input type="hidden" name="order_number" data-h-order-number>
+      <input type="hidden" name="order_date" data-h-order-date>
+      <input type="hidden" name="no_order_history" data-h-no-history value="false">
+      <input type="hidden" name="item_id" data-h-item-id>
+      <input type="hidden" name="order_id" data-h-order-id>
+      <input type="hidden" name="order_line_id" data-h-order-line-id>
+      <input type="hidden" name="order_token" data-h-order-token>
+      <input type="hidden" name="unverified_purchase" data-h-unverified value="false">
+
+      <div class="repair-intake__actions">
+        <button type="button" class="button repair-intake__submit" data-next="2">Next</button>
+      </div>
+    </section>
+
+    {%- comment -%} ───────── Step 2: the issue ───────── {%- endcomment -%}
+    <section class="repair-intake__panel" data-step="2" hidden>
+      <label class="repair-intake__label">
+        <span>What needs repairing? <span aria-hidden="true">*</span></span>
+        <textarea name="description" rows="4" placeholder="Describe the issue" aria-required="true"></textarea>
+      </label>
+
+      <label class="repair-intake__label">
+        <span>Photos</span>
+        <input type="file" name="images[]" accept="image/*" multiple data-repair-images>
+        <small class="repair-intake__hint">Add up to {{ block.settings.max_images | default: 6 }} photos.</small>
+      </label>
+
+      <div class="repair-intake__actions">
+        <button type="button" class="button button--secondary repair-intake__back" data-back="1">Back</button>
+        <button type="button" class="button repair-intake__submit" data-next="3">Next</button>
+      </div>
+    </section>
+
+    {%- comment -%}
+      ───────── Step 3: your details ─────────
+      Each label's text sits in one <span>, so a required "*" can't wrap onto
+      its own grid row and push that field below its neighbour.
+    {%- endcomment -%}
+    <section class="repair-intake__panel" data-step="3" hidden>
+      <div class="repair-intake__row">
+        <label class="repair-intake__label">
+          <span>Name</span>
+          <input type="text" name="customer_name" value="{{ customer.name }}" autocomplete="name">
+        </label>
+        <label class="repair-intake__label">
+          <span>Email <span aria-hidden="true">*</span></span>
+          <input type="email" name="customer_email" value="{{ customer.email }}" autocomplete="email" aria-required="true">
+        </label>
+      </div>
+
+      <label class="repair-intake__label">
+        <span>Phone</span>
+        <input type="tel" name="customer_phone" value="{{ customer.phone | default: address.phone }}" autocomplete="tel">
+      </label>
+
+      {%- if block.settings.collect_address -%}
+        <fieldset class="repair-intake__fieldset">
+          <legend>Return address</legend>
+          <label class="repair-intake__label">
+            <span>Address line 1</span>
+            <input type="text" name="customer_address[address1]" value="{{ address.address1 }}" autocomplete="address-line1">
+          </label>
+          <label class="repair-intake__label">
+            <span>Address line 2</span>
+            <input type="text" name="customer_address[address2]" value="{{ address.address2 }}" autocomplete="address-line2">
+          </label>
+          <div class="repair-intake__row">
+            <label class="repair-intake__label">
+              <span>City</span>
+              <input type="text" name="customer_address[city]" value="{{ address.city }}" autocomplete="address-level2">
+            </label>
+            <label class="repair-intake__label">
+              <span>Postcode</span>
+              <input type="text" name="customer_address[zip]" value="{{ address.zip }}" autocomplete="postal-code">
+            </label>
+          </div>
+          <label class="repair-intake__label">
+            <span>Country</span>
+            <input type="text" name="customer_address[country]" value="{{ address.country }}" autocomplete="country-name">
+          </label>
+        </fieldset>
+      {%- endif -%}
+
+      <div class="repair-intake__actions">
+        <button type="button" class="button button--secondary repair-intake__back" data-back="2">Back</button>
+        <button type="submit" class="button repair-intake__submit" data-repair-submit>Send request</button>
+      </div>
+    </section>
+  </form>
+
+  <div class="repair-intake__confirmation" data-confirmation tabindex="-1" hidden>
+    <h3>Thank you!</h3>
+    <p>{{ block.settings.confirmation_text }}</p>
+    <p class="repair-intake__hint" data-confirmation-ref></p>
+    <ol class="repair-intake__tracker" aria-label="Repair progress">
+      <li class="repair-intake__tracker-step is-active" aria-current="step">Requested</li>
+      <li class="repair-intake__tracker-step">Quoted</li>
+      <li class="repair-intake__tracker-step">In repair</li>
+      <li class="repair-intake__tracker-step">Returned</li>
+    </ol>
+    {%- if block.settings.status_url != blank -%}
+      <a class="link repair-intake__link" href="{{ block.settings.status_url }}" data-status-link>Track your repair</a>
+    {%- endif -%}
+  </div>
+
+  <div class="repair-intake__status" data-repair-status role="status" hidden></div>
+</div>

@@ -1,0 +1,7 @@
+api_version = "2025-10"
+uid = "cf5feb92-2aa3-aa3c-1b40-2c0a19f11b5247b9e4f5"
+
+[[extensions]]
+type = "theme"
+name = "Repair intake"
+handle = "repair-intake"

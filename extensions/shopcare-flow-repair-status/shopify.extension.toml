@@ -1,0 +1,24 @@
+# Shopify Flow trigger: fired when a repair ticket changes status.
+[[extensions]]
+name = "Repair status changed"
+uid = "bcbcf82c-d1ec-6690-282f-e2b51b094926ca127497"
+type = "flow_trigger"
+handle = "shopcare-repair-status"
+description = "A customer's ShopCare repair moved to a new status."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "customer_reference"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Ticket number"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Status"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Product title"

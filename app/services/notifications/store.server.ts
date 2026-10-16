@@ -2,22 +2,10 @@
  * Where notification deliveries are recorded: the idempotency record and the
  * log merchants see in Settings (Rails `notification_deliveries`).
  *
- * TODO(integration): implement `NotificationStore` with Prisma once the schema
- * has a `NotificationDelivery` model. Rails columns plus the v2 additions:
- *
- *   id                   pk
- *   shop_id              fk shops, not null
- *   event                text not null         ("repair_status_changed", …)
- *   channel              text not null         "email" | "staff_email" | "flow" | "klaviyo"
- *   status               text not null default "pending"  pending | sent | skipped | failed
- *   payload              jsonb not null default {}        (DeliveryPayload below)
- *   error                text                  (Rails name; holds last_error / skip reason)
- *   idempotency_key      text not null         "<event>:<record key>"
- *   attempts             int not null default 0
- *   provider_message_id  text                  (Resend id for email channels)
- *   created_at, updated_at
- *   unique (shop_id, channel, idempotency_key)
- *   index  (shop_id, created_at)              (Rails, for the "Recent notifications" list)
+ * Implementations: `PrismaNotificationStore` (prisma-store.server.ts, the
+ * production default, table `notification_deliveries` with a unique
+ * (shop_id, channel, idempotency_key)) and `InMemoryNotificationStore` below
+ * (unit tests).
  *
  * `claim` is INSERT … ON CONFLICT (shop_id, channel, idempotency_key) DO
  * NOTHING, then SELECT the row (Prisma: create, catch P2002, findUnique), so a

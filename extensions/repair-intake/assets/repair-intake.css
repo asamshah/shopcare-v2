@@ -453,9 +453,10 @@
   margin-block: 0 0.5em;
 }
 
-/* Status tracker: Requested → Quoted → In repair → Returned. */
+/* Status tracker: Requested → Quoted → Awaiting item → Received → In repair → Returned. */
 .repair-intake__tracker {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5em;
   margin-block: 1.5em 1em;
   padding: 0;
@@ -464,7 +465,7 @@
 }
 
 .repair-intake__tracker-step {
-  flex: 1;
+  flex: 1 1 5.5em;
   padding-block-start: 0.5em;
   border-block-start: 3px solid;
   border-color: var(--shopcare-line);

@@ -46,3 +46,27 @@ export function presence(value: unknown): string | null {
   const text = String(value);
   return text.trim() === "" ? null : text;
 }
+
+/**
+ * The customer-facing repair steps: the repair form's confirmation and the
+ * Repair status block show where a repair is (ShopCare sends no status
+ * emails). Closed tickets (cancelled, rejected) have no step.
+ */
+export const REPAIR_STEPS = ["Requested", "Quoted", "Awaiting item", "Received", "In repair", "Returned"] as const;
+
+const STEP_OF: Record<string, number> = {
+  new: 0,
+  assessing: 0,
+  quoted: 1,
+  quote_declined: 1,
+  awaiting_item: 2,
+  received: 3,
+  in_repair: 4,
+  ready: 4,
+  completed: 5,
+};
+
+/** Index into REPAIR_STEPS, or null for a closed ticket. */
+export function repairStep(status: string): number | null {
+  return Object.hasOwn(STEP_OF, status) ? STEP_OF[status] : null;
+}

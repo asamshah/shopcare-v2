@@ -481,11 +481,44 @@
       return a;
     }
 
+    // Requested → Quoted → … → Returned, up to the ticket's step.
+    function tracker(steps, current) {
+      var list = el("ol", "shopcare__tracker");
+      list.setAttribute("aria-label", "Repair progress");
+      steps.forEach(function (label, i) {
+        var step = el("li", "shopcare__tracker-step" + (i <= current ? " is-active" : ""), label);
+        if (i === current) step.setAttribute("aria-current", "step");
+        list.appendChild(step);
+      });
+      return list;
+    }
+
+    // Care credit codes (ShopCare doesn't email them).
+    function renderCredits(credits) {
+      var box = root.querySelector("[data-status-credits]");
+      if (!box || !credits.length) return;
+      credits.forEach(function (credit) {
+        var card = el("div", "shopcare__item shopcare__credit");
+        card.appendChild(el("strong", null, "Care credit" + (credit.product_title ? " for your " + credit.product_title : "")));
+        var line = el("span");
+        line.appendChild(document.createTextNode("Your code: "));
+        line.appendChild(el("code", null, credit.code));
+        line.appendChild(document.createTextNode(" · " + money(credit.amount, credit.currency || "GBP")));
+        card.appendChild(line);
+        if (credit.expires_at) card.appendChild(el("span", "shopcare__badge-detail", "Use by " + new Date(credit.expires_at).toLocaleDateString()));
+        box.appendChild(card);
+      });
+      box.hidden = false;
+    }
+
     getJSON(root.getAttribute("data-status-url"))
       .then(function (data) {
         root.querySelector("[data-status-loading]").hidden = true;
         var tickets = (data && data.tickets) || [];
-        if (!tickets.length) { root.querySelector("[data-status-empty]").hidden = false; return; }
+        var steps = (data && data.steps) || [];
+        var credits = (data && data.care_credits) || [];
+        renderCredits(credits);
+        if (!tickets.length) { if (!credits.length) root.querySelector("[data-status-empty]").hidden = false; return; }
         tickets.forEach(function (ticket) {
           var card = el("div", "shopcare__item");
           card.appendChild(el("strong", null, ticket.product_title || "Repair #" + ticket.id));
@@ -510,6 +543,7 @@
             row.appendChild(slip);
           }
           card.appendChild(row);
+          if (steps.length && typeof ticket.step === "number") card.appendChild(tracker(steps, ticket.step));
           list.appendChild(card);
         });
       })

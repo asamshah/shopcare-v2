@@ -304,7 +304,7 @@ async function requestForm() {
   assert.match(root.querySelector("[data-confirmation]").textContent, /repair request has been received/);
   assert.strictEqual(root.querySelector("[data-confirmation]").hidden, false);
   assert.match(root.querySelector("[data-confirmation-ref]").textContent, /#1/);
-  assert.deepStrictEqual([...root.querySelectorAll(".repair-intake__tracker-step")].map((li) => li.textContent), ["Requested", "Quoted", "In repair", "Returned"]);
+  assert.deepStrictEqual([...root.querySelectorAll(".repair-intake__tracker-step")].map((li) => li.textContent), ["Requested", "Quoted", "Awaiting item", "Received", "In repair", "Returned"]);
   assert.strictEqual(root.querySelector("[data-status-link]").getAttribute("href"), "/pages/repair-status");
 }
 
@@ -526,11 +526,14 @@ async function launcher() {
 }
 
 async function repairStatus() {
-  const env = setup(await block("repair_status"), [["/apps/repairs/status", { ok: true, logged_in: true, tickets: [
-    { id: 7, status_label: "Quoted", product_title: "Boot", cover: { kind: "care", name: "18-month Care", badge: "ShopCare – 18 month plan", ends_at: "2028-03-01" }, quotation: { status: "sent", currency: "GBP", subtotal: "24.00", review_url: "/apps/repairs/quotes/abc" } },
-    { id: 8, status_label: "Quoted", product_title: "Shoe", quotation: { status: "paid", currency: "GBP", subtotal: "18.00" } },
-    { id: 9, status_label: "Completed", product_title: "Sandal", cover: { kind: "warranty", name: "12-month warranty", badge: "12-month warranty", ends_at: "2027-03-12" } },
-    { id: 10, status: "awaiting_item", status_label: "Awaiting item", product_title: "Loafer", quotation: { status: "paid", currency: "GBP", subtotal: "30.00" }, postage_slip_url: "/apps/repairs/tickets/10/postage-slip?expires=1793000000&token=abc" }
+  const env = setup(await block("repair_status"), [["/apps/repairs/status", { ok: true, logged_in: true,
+  steps: ["Requested", "Quoted", "Awaiting item", "Received", "In repair", "Returned"],
+  care_credits: [{ code: "CARE-7XK2", amount: "15.00", currency: "GBP", expires_at: "2027-01-14", product_title: "Aria Boot" }],
+  tickets: [
+    { id: 7, status_label: "Quoted", step: 1, product_title: "Boot", cover: { kind: "care", name: "18-month Care", badge: "ShopCare – 18 month plan", ends_at: "2028-03-01" }, quotation: { status: "sent", currency: "GBP", subtotal: "24.00", review_url: "/apps/repairs/quotes/abc" } },
+    { id: 8, status_label: "Quoted", step: 1, product_title: "Shoe", quotation: { status: "paid", currency: "GBP", subtotal: "18.00" } },
+    { id: 9, status_label: "Completed", step: 5, product_title: "Sandal", cover: { kind: "warranty", name: "12-month warranty", badge: "12-month warranty", ends_at: "2027-03-12" } },
+    { id: 10, status: "awaiting_item", status_label: "Awaiting item", step: 2, product_title: "Loafer", quotation: { status: "paid", currency: "GBP", subtotal: "30.00" }, postage_slip_url: "/apps/repairs/tickets/10/postage-slip?expires=1793000000&token=abc" }
   ] }]]);
   env.run("shopcare-pdp.js");
   await tick();
@@ -552,6 +555,34 @@ async function repairStatus() {
   assert.match(care.querySelector(".shopcare__badge-detail").textContent, /^Covered until .+2028$/);
   assert.strictEqual(warranty.querySelector(".shopcare__badge--warranty").textContent, "12-month warranty");
   assert.match(warranty.querySelector(".shopcare__badge-detail").textContent, /^Until .+2027$/);
+  // ShopCare sends no status emails: each repair shows its step.
+  const loafer = document.querySelectorAll("[data-status-list] .shopcare__item")[3];
+  const steps = [...loafer.querySelectorAll(".shopcare__tracker-step")];
+  assert.deepStrictEqual(steps.map((li) => li.textContent), ["Requested", "Quoted", "Awaiting item", "Received", "In repair", "Returned"]);
+  assert.deepStrictEqual(steps.map((li) => li.classList.contains("is-active")), [true, true, true, false, false, false]);
+  assert.strictEqual(loafer.querySelector("[aria-current=step]").textContent, "Awaiting item");
+  const returned = document.querySelectorAll("[data-status-list] .shopcare__item")[2];
+  assert.strictEqual(returned.querySelector("[aria-current=step]").textContent, "Returned");
+  // ...nor Care credit codes: the logged-in customer sees theirs here.
+  const credit = document.querySelector("[data-status-credits] .shopcare__credit");
+  assert.match(credit.textContent, /Aria Boot/);
+  assert.strictEqual(credit.querySelector("code").textContent, "CARE-7XK2");
+  assert.match(credit.textContent, /· £15(?![\d.])/);
+  assert.match(credit.textContent, /Use by .+2027/);
+}
+
+// A closed repair has no tracker; credits alone still show (no "no repairs" message hiding them).
+async function repairStatusCreditsOnly() {
+  const env = setup(await block("repair_status"), [["/apps/repairs/status", { ok: true, logged_in: true,
+    steps: ["Requested", "Quoted", "Awaiting item", "Received", "In repair", "Returned"],
+    care_credits: [{ code: "CARE-1", amount: "9.00", currency: "GBP", product_title: "Boot" }],
+    tickets: [{ id: 3, status: "cancelled", status_label: "Cancelled", product_title: "Shoe" }] }]]);
+  env.run("shopcare-pdp.js");
+  await tick();
+  const { document } = env;
+  assert.strictEqual(document.querySelectorAll(".shopcare__tracker").length, 0);
+  assert.strictEqual(document.querySelector("[data-status-credits] code").textContent, "CARE-1");
+  assert.doesNotMatch(document.querySelector("[data-status-credits]").textContent, /Use by/);
 }
 
 // Add Care later: each plan row leads with the badge the cover will carry.
@@ -658,7 +689,8 @@ describe("storefront: the theme extension in jsdom", () => {
   it("Request form: order + email lookup (match and mismatch); a rejected item isn't confirmed", orderLookup);
   it("Request form: details row aligned (Email no longer sits below Name)", detailsRow);
   it("App embed: button opens and closes the form", launcher);
-  it("Repair status: a quote to review & pay, the postage slip while we wait for the item, cover badges", repairStatus);
+  it("Repair status: a quote to review & pay, the postage slip while we wait for the item, cover badges, steps, Care credits", repairStatus);
+  it("Repair status: closed repairs have no tracker; Care credits still show", repairStatusCreditsOnly);
   it("Add Care later: plan rows carry the cover badge, added tagged to the item", careLater);
   it("Logged-in customer: proxy URLs carry a token signed the way the app verifies it", signedCustomerToken);
 });

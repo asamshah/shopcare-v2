@@ -256,3 +256,36 @@
     transition: none;
   }
 }
+
+/* Repair status: where each repair is (Requested → … → Returned). */
+.shopcare__tracker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shopcare__tracker-step {
+  flex: 1 1 5.5em;
+  padding-block-start: 0.4em;
+  border-block-start: 3px solid;
+  border-color: var(--shopcare-line);
+  color: var(--shopcare-muted);
+  font-size: 0.85em;
+}
+
+.shopcare__tracker-step.is-active {
+  border-color: var(--shopcare-accent, currentColor);
+  color: inherit;
+}
+
+.shopcare__tracker-step[aria-current="step"] {
+  font-weight: bolder;
+}
+
+.shopcare__credit code {
+  font-weight: bolder;
+  letter-spacing: 0.05em;
+}

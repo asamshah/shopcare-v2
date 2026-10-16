@@ -5,7 +5,17 @@ import { RECENT_ORDER } from "../models/repair-ticket.server";
 import { completeWorkshopAddress, proxyPathPrefix } from "../models/shop.server";
 import { postageSlipStatusPath } from "../services/repairs/postage-slip.server";
 import { storefrontRoute } from "../services/storefront/deps.server";
-import { compact, iso8601, money2, statusLabel } from "../services/storefront/json.server";
+import {
+  compact,
+  iso8601,
+  isoDate,
+  money2,
+  REPAIR_STEPS,
+  repairStep,
+  statusLabel,
+} from "../services/storefront/json.server";
+import { storefrontCurrency } from "../services/storefront/care-json.server";
+import { itemLabel } from "../models/item.server";
 import { coverJson } from "../services/storefront/product-cards.server";
 
 /**
@@ -15,11 +25,17 @@ import { coverJson } from "../services/storefront/product-cards.server";
  * payment. A ticket awaiting the customer's item links its postage slip
  * (signed for a day). Per customer: never cached. Port of
  * Proxy::StatusController.
+ *
+ * v2: ShopCare sends no status emails, so each ticket carries its step
+ * (`step`, an index into `steps`: Requested → Quoted → Awaiting item →
+ * Received → In repair → Returned; absent when cancelled or rejected), and
+ * the customer's unexpired Care credit codes are listed (`care_credits`),
+ * since ShopCare doesn't email those either.
  */
 export const loader = storefrontRoute({}, async (ctx) => {
   const customerId = await ctx.currentCustomerId();
   if (!customerId) {
-    return ctx.json({ ok: true, logged_in: false, tickets: [] }, { cache: "no-store" });
+    return ctx.json({ ok: true, logged_in: false, tickets: [], care_credits: [] }, { cache: "no-store" });
   }
   const shop = ctx.shopRecord;
   const now = ctx.deps.now();
@@ -33,15 +49,37 @@ export const loader = storefrontRoute({}, async (ctx) => {
     orderBy: RECENT_ORDER,
     take: 50,
   });
+  const credits = await prisma.careCredit.findMany({
+    where: {
+      shopId: shop.id,
+      cover: { item: { shopifyCustomerId: customerId } },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    },
+    include: { cover: { include: { item: true } } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 20,
+  });
+  const currency = storefrontCurrency(shop);
   return ctx.json(
     {
       ok: true,
       logged_in: true,
+      steps: REPAIR_STEPS,
+      care_credits: credits.map((credit) =>
+        compact({
+          code: credit.code,
+          amount: money2(credit.amount),
+          currency,
+          expires_at: isoDate(credit.expiresAt),
+          product_title: itemLabel(credit.cover.item),
+        }),
+      ),
       tickets: tickets.map((ticket) =>
         compact({
           id: ticket.id,
           status: ticket.status,
           status_label: statusLabel(ticket.status),
+          step: repairStep(ticket.status),
           product_title: ticket.productTitle,
           created_at: iso8601(ticket.createdAt),
           cover: ticket.cover ? coverJson(ticket.cover) : null,

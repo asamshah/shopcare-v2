@@ -48,7 +48,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     await prisma.item.findFirst({
       where: { id: parseId(params.id), shopId: shop.id },
       include: {
-        covers: { orderBy: COVERS_ORDER },
+        covers: { orderBy: COVERS_ORDER, include: { careCredits: true } },
         registration: true,
         repairTickets: { orderBy: TICKETS_ORDER },
       },
@@ -93,6 +93,15 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
               text: `Item refunded: ${action === "credit" ? `credit code ${String(refund.code ?? "")} issued` : REFUND_ACTIONS[action] ?? action}${
                 refund.status === "failed" ? ` (failed: ${String(refund.error ?? "")})` : ""
               }`,
+            }
+          : null,
+        // ShopCare doesn't email credit codes: staff share it; the customer also sees it on the Repair status page.
+        credit: cover.careCredits[0]
+          ? {
+              code: cover.careCredits[0].code,
+              text: `Care credit code ${cover.careCredits[0].code} for ${formatMoney(cover.careCredits[0].amount, currency)}${
+                cover.careCredits[0].expiresAt ? `, use by ${formatDate(cover.careCredits[0].expiresAt)}` : ""
+              }. Give it to the customer; it also shows on their Repair status page when they log in.`,
             }
           : null,
       };
@@ -179,6 +188,11 @@ export default function Item() {
                         ) : (
                           <s-text color="subdued">{cover.refund.text}</s-text>
                         )
+                      ) : null}
+                      {cover.credit ? (
+                        <s-banner tone="info" heading={`Credit code: ${cover.credit.code}`}>
+                          {cover.credit.text}
+                        </s-banner>
                       ) : null}
                     </s-stack>
                   </s-box>

@@ -9,7 +9,10 @@
       guests verify an order with its email), or describe it
     Step 2: describe the issue, add photos
     Step 3: contact details (prefilled when logged in), then submit →
-      confirmation with a status tracker
+      confirmation with a status tracker (Requested → Quoted → Awaiting
+      item → Received → In repair → Returned; ShopCare sends no emails of
+      its own, so this and the Repair status block are where customers see
+      progress)
   Submits to the signed App Proxy; a logged-in customer's proxy URLs carry
   their signed token (shopcare_customer_query). Pass `block` (settings:
   heading, confirmation_text, collect_address, max_images, status_url),
@@ -232,6 +235,8 @@
     <ol class="repair-intake__tracker" aria-label="Repair progress">
       <li class="repair-intake__tracker-step is-active" aria-current="step">Requested</li>
       <li class="repair-intake__tracker-step">Quoted</li>
+      <li class="repair-intake__tracker-step">Awaiting item</li>
+      <li class="repair-intake__tracker-step">Received</li>
       <li class="repair-intake__tracker-step">In repair</li>
       <li class="repair-intake__tracker-step">Returned</li>
     </ol>

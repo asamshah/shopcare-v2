@@ -1,9 +1,12 @@
 {%- comment -%}
   Repair status — for logged-in customers: their repair requests and where each
-  one is. A sent quote awaiting payment shows "Quote ready – review & pay",
-  linking to its review page (Pay now, or decline). A repair waiting for the
-  customer to post the item shows "Download postage slip" (the PDF with the
-  address label and packing slip).
+  one is (a step tracker: Requested → Quoted → Awaiting item → Received → In
+  repair → Returned). A sent quote awaiting payment shows "Quote ready – review
+  & pay", linking to its review page (Pay now, or decline). A repair waiting
+  for the customer to post the item shows "Download postage slip" (the PDF
+  with the address label and packing slip). Their Care credit codes are listed
+  too. ShopCare sends no emails of its own, so this is where customers follow
+  their repairs.
 {%- endcomment -%}
 
 {%- capture customer_query -%}{% render 'shopcare_customer_query', customer: customer, app: app %}{%- endcapture -%}
@@ -20,6 +23,7 @@
   {%- if customer -%}
     <p class="shopcare__hint" data-status-loading>Loading your repairs…</p>
     <p class="shopcare__hint" data-status-empty hidden>{{ block.settings.empty_text }}</p>
+    <div class="shopcare__list" data-status-credits hidden></div>
     <div class="shopcare__list" data-status-list></div>
   {%- else -%}
     <p>

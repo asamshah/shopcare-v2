@@ -9,7 +9,9 @@ import prisma from "../../../app/db.server";
 import {
   careSettings,
   labourRate,
+  careOfferDelayDays,
   notificationsSettings,
+  repairStatusUrl,
   partsEnabled,
   partsSettings,
   quoteValidDays,
@@ -246,6 +248,31 @@ describe("settings", () => {
       "Notify staff at must be an email address.",
     );
     expect(notificationsSettings(await reload(shop.id)).staff_email).toBe("workshop@shop.test");
+  });
+
+  it("Add Care offer delay and the repair status page", async () => {
+    const shop = await setup();
+    expect((await show()).notifications).toMatchObject({ careOfferDelayDays: "7", statusUrl: "" });
+
+    await save({
+      "notifications[care_offer_delay_days]": "14",
+      "notifications[status_url]": "https://shop.test/pages/repair-status",
+    });
+    const saved = await reload(shop.id);
+    expect(careOfferDelayDays(saved)).toBe(14);
+    expect(repairStatusUrl(saved)).toBe("https://shop.test/pages/repair-status");
+    expect((await show()).notifications).toMatchObject({ careOfferDelayDays: "14" });
+
+    expect(flash(await save({ "notifications[care_offer_delay_days]": "0" })).alert).toBe(
+      "Send the Add Care offer after must be a whole number of days (1 to 365).",
+    );
+    expect(flash(await save({ "notifications[status_url]": "javascript:alert(1)" })).alert).toBe(
+      "Repair status page must be a full web address (https://…).",
+    );
+    expect(careOfferDelayDays(await reload(shop.id))).toBe(14);
+
+    await save({ "notifications[care_offer_delay_days]": "", "notifications[status_url]": "" });
+    expect([careOfferDelayDays(await reload(shop.id)), repairStatusUrl(await reload(shop.id))]).toEqual([7, null]);
   });
 
   it("lists this shop's recent notifications only", async () => {

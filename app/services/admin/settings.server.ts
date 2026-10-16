@@ -137,7 +137,10 @@ export async function saveSettings(
   return { ok: true };
 }
 
-/** settings.notifications: flow, staff_email, support_email, emails.<kind>.{enabled,subject,intro}. */
+/**
+ * settings.notifications: flow, staff_email, support_email, care_offer_delay_days,
+ * status_url, emails.<kind>.{enabled,subject,intro}.
+ */
 function readNotifications(
   form: Form,
   current: Record<string, unknown>,
@@ -155,6 +158,21 @@ function readNotifications(
     const email = field(form, name).trim();
     if (!zEmailOrBlank.safeParse(email).success) return { alert: `${labels[key]} must be an email address.` };
     value[key] = email;
+    changed = true;
+  }
+  if (has(form, "notifications[care_offer_delay_days]")) {
+    const raw = field(form, "notifications[care_offer_delay_days]").trim();
+    const days = Number(raw);
+    if (raw === "") delete value.care_offer_delay_days;
+    else if (!Number.isInteger(days) || days < 1 || days > 365)
+      return { alert: "Send the Add Care offer after must be a whole number of days (1 to 365)." };
+    else value.care_offer_delay_days = days;
+    changed = true;
+  }
+  if (has(form, "notifications[status_url]")) {
+    const url = field(form, "notifications[status_url]").trim();
+    if (url && !/^https?:\/\/\S+$/i.test(url)) return { alert: "Repair status page must be a full web address (https://…)." };
+    value.status_url = url;
     changed = true;
   }
   const emails = { ...jsonObject(current.emails as Prisma.JsonValue) };

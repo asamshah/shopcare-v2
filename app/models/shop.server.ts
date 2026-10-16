@@ -163,6 +163,32 @@ export function notificationsSettings(shop: Pick<Shop, "settings">): Record<stri
 export const DEFAULT_CARE_OFFER_DELAY_DAYS = 7;
 
 /**
+ * The storefront page with the Repair status block
+ * (settings.notifications.status_url), linked from the customer's repair
+ * emails. Only an absolute http(s) URL; null when not set.
+ */
+export function repairStatusUrl(shop: Pick<Shop, "settings">): string | null {
+  const value = notificationsSettings(shop).status_url;
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The ticket in the ShopCare admin (app.tickets.$id → /app/tickets/:id),
+ * for staff emails. SHOPIFY_APP_HANDLE is the app's handle in the admin URL.
+ */
+export function adminTicketUrl(shopDomain: string, ticketId: number): string {
+  const store = shopDomain.replace(/\.myshopify\.com$/, "");
+  const handle = process.env.SHOPIFY_APP_HANDLE || "shopcare";
+  return `https://admin.shopify.com/store/${store}/apps/${handle}/app/tickets/${ticketId}`;
+}
+
+/**
  * Days after purchase the "Add Care to your purchase" offer is emitted by the
  * daily care-offers job (netlify/functions/daily-care-offers.mts).
  */

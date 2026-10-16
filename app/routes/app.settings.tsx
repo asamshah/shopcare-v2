@@ -10,6 +10,7 @@ import { useElementValue } from "../components/use-element-value";
 import { formatShortDateTime, statusLabel } from "../lib/format";
 import { RECENT_ORDER as DELIVERIES_ORDER } from "../models/notification-delivery.server";
 import {
+  careOfferDelayDays,
   careSettings,
   notificationsSettings,
   partsEnabled,
@@ -87,6 +88,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       flow: notifications.flow === true || notifications.flow === "true",
       staffEmail: text(notifications.staff_email),
       supportEmail: text(notifications.support_email),
+      careOfferDelayDays: String(careOfferDelayDays(shop)),
+      statusUrl: text(notifications.status_url),
       contactEmail: text(settings.contact_email),
       emails: EMAIL_KINDS.map((kind) => {
         const entry = jsonObject(emails[kind] as never);
@@ -360,6 +363,22 @@ export default function Settings() {
                     placeholder={d.notifications.contactEmail || "support@yourstore.com"}
                     details="Customers' replies go here. Leave blank to use your store's contact email."
                   ></s-email-field>
+                  <s-url-field
+                    label="Repair status page"
+                    name="notifications[status_url]"
+                    value={d.notifications.statusUrl}
+                    placeholder="https://yourstore.com/pages/repair-status"
+                    details="The page with the Repair status block. Customers' repair emails link to it."
+                  ></s-url-field>
+                  <s-number-field
+                    label="Send the Add Care offer after (days)"
+                    name="notifications[care_offer_delay_days]"
+                    value={d.notifications.careOfferDelayDays}
+                    min={1}
+                    max={365}
+                    step={1}
+                    details="Days after purchase that customers who bought something Care could cover get the offer."
+                  ></s-number-field>
                 </s-grid>
                 {d.notifications.emails.map((e) => (
                   <s-box key={e.kind} padding="small-200" border="base" border-radius="base">

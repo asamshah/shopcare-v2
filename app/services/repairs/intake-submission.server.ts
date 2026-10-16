@@ -29,7 +29,7 @@ import {
   linkItem,
   openWhere,
 } from "../../models/repair-ticket.server";
-import { settingsOf } from "../../models/shop.server";
+import { adminTicketUrl, repairStatusUrl, settingsOf } from "../../models/shop.server";
 import { createTicketActivity } from "../../models/ticket-activity.server";
 import { sniffImageType } from "../../lib/image-type";
 import { createTicketImage, MAX_BYTES, validateTicketImage } from "../../models/ticket-image.server";
@@ -392,6 +392,8 @@ async function announce(
           customerName: ticket.customerName,
           customerEmail: ticket.customerEmail,
           description: ticket.description,
+          statusUrl: repairStatusUrl(shop),
+          adminUrl: adminTicketUrl(shop.shopifyDomain, ticket.id),
         },
       },
       options.notifications,

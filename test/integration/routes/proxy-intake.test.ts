@@ -231,6 +231,10 @@ describe("POST /proxy/intake", () => {
   });
 
   it("queues the outbound webhook and emits repair_submitted", async () => {
+    await prisma.shop.update({
+      where: { id: shop.id },
+      data: { settings: { webhook_url: "https://hooks.example.com/shopcare", notifications: { status_url: "https://proxy-test.example/pages/repairs" } } },
+    });
     const body = await json(await post({ description: "Sole", customer_email: "c@example.com", product_title: "Boot" }));
 
     expect(fakes.enqueued).toEqual([
@@ -240,5 +244,10 @@ describe("POST /proxy/intake", () => {
     expect(deliveries.map((d) => [d.event, d.channel])).toEqual(
       expect.arrayContaining([["repair_submitted", "email"]]),
     );
+    const submitted = deliveries.find((d) => d.event === "repair_submitted")!;
+    expect(submitted.payload.data).toMatchObject({
+      statusUrl: "https://proxy-test.example/pages/repairs",
+      adminUrl: `https://admin.shopify.com/store/proxy-test/apps/shopcare/app/tickets/${body.ticket_id}`,
+    });
   });
 });

@@ -6,14 +6,8 @@
  */
 import type { Quotation, RepairTicket, Shop } from "@prisma/client";
 import { formattedSubtotal, validUntil } from "../../models/quotation.server";
+import { adminTicketUrl } from "../../models/shop.server";
 import { notify, type NotifyOptions } from "../notifications/notify.server";
-
-/** The ticket in the ShopCare admin, for the staff email's button. */
-export function adminTicketUrl(shopDomain: string, ticketId: number): string {
-  const store = shopDomain.replace(/\.myshopify\.com$/, "");
-  const handle = process.env.SHOPIFY_APP_HANDLE || "shopcare";
-  return `https://admin.shopify.com/store/${store}/apps/${handle}/app/tickets/${ticketId}`;
-}
 
 type Q = Pick<Quotation, "id" | "currency" | "subtotal" | "decisionReason" | "decisionExpiresAt">;
 type T = Pick<

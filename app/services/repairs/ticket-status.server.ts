@@ -26,7 +26,7 @@ import {
   repairStatusChangedEvent,
   type RepairTicketStatus,
 } from "../../models/repair-ticket.server";
-import { partsEnabled } from "../../models/shop.server";
+import { partsEnabled, repairStatusUrl } from "../../models/shop.server";
 import { createTicketActivity } from "../../models/ticket-activity.server";
 import type { RepairStatus } from "../notifications/events.server";
 import { notify, type NotifyOptions } from "../notifications/notify.server";
@@ -44,7 +44,7 @@ import {
 
 /** Rails after_update_commit: tell the customer their repair moved along. */
 export async function notifyRepairStatusChanged(
-  shop: Pick<Shop, "shopifyDomain">,
+  shop: Pick<Shop, "shopifyDomain" | "settings">,
   ticket: Pick<
     RepairTicket,
     "id" | "shopifyCustomerId" | "customerEmail" | "customerName" | "status" | "productTitle"
@@ -65,6 +65,7 @@ export async function notifyRepairStatusChanged(
       status: ticket.status as RepairStatus,
       productTitle: ticket.productTitle ?? "",
       customerName: ticket.customerName,
+      statusUrl: repairStatusUrl(shop),
     },
     options,
   );

@@ -49,7 +49,89 @@ export function publicCacheHeaders({
   return headers;
 }
 
-/** For customer-specific proxy responses: never stored by any cache. */
+/**
+ * For customer-specific or mutating proxy responses: never stored by any
+ * cache. Netlify doesn't cache function responses unless told to, but the
+ * explicit CDN header keeps a stray `CDN-Cache-Control` from changing that.
+ */
 export function privateNoStoreHeaders(): Headers {
-  return new Headers({ "Cache-Control": "private, no-store" });
+  return new Headers({
+    "Cache-Control": "private, no-store",
+    "Netlify-CDN-Cache-Control": "no-store",
+  });
+}
+
+export type CachePolicy = "no-store" | PublicCacheOptions;
+
+function cacheHeaders(cache: CachePolicy): Headers {
+  return cache === "no-store"
+    ? privateNoStoreHeaders()
+    : publicCacheHeaders(cache);
+}
+
+function mergeHeaders(base: Headers, extra?: HeadersInit): Headers {
+  if (extra) new Headers(extra).forEach((value, key) => base.set(key, value));
+  return base;
+}
+
+/**
+ * A JSON response. `cache` is required so every proxy endpoint decides: pass
+ * "no-store" for anything customer-specific, or PublicCacheOptions for data
+ * that's identical for every visitor.
+ */
+export function jsonResponse(
+  body: unknown,
+  {
+    cache,
+    status = 200,
+    headers,
+  }: { cache: CachePolicy; status?: number; headers?: HeadersInit },
+): Response {
+  const merged = mergeHeaders(cacheHeaders(cache), headers);
+  merged.set("Content-Type", "application/json; charset=utf-8");
+  return new Response(JSON.stringify(body), { status, headers: merged });
+}
+
+/**
+ * Text for a page Shopify renders as Liquid (App Proxy pages): HTML-escaped,
+ * with braces escaped too, so a value like "{{ shop.name }}" or "{% … %}"
+ * can't run as Liquid. Port of Rails `LiquidHelper#liquid_text`.
+ */
+export function liquidText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/\{/g, "&#123;")
+    .replace(/\}/g, "&#125;");
+}
+
+/**
+ * An HTML page Shopify renders inside the merchant's theme
+ * (`Content-Type: application/liquid`). Escape every dynamic value with
+ * `liquidText`. `layout: false` renders without the theme layout. Unlike the
+ * template's `liquid()` helper this doesn't rewrite form actions or links
+ * (it appends trailing slashes, which the ported routes don't expect).
+ * No-store by default, as the Rails quote page.
+ */
+export function liquidResponse(
+  html: string,
+  {
+    status = 200,
+    layout = true,
+    cache = "no-store",
+    headers,
+  }: {
+    status?: number;
+    layout?: boolean;
+    cache?: CachePolicy;
+    headers?: HeadersInit;
+  } = {},
+): Response {
+  const merged = mergeHeaders(cacheHeaders(cache), headers);
+  merged.set("Content-Type", "application/liquid");
+  const body = layout ? html : `{% layout none %}${html}`;
+  return new Response(body, { status, headers: merged });
 }

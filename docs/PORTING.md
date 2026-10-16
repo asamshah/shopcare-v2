@@ -48,8 +48,8 @@ The theme extension calls the App Proxy on storefront pages; `care_offer` hits
 `/apps/repairs/care_plans` on **every PDP view**. Each uncached request is a
 Netlify Function invocation, billed and with a cold-start risk.
 
-- Cache public responses on Netlify's CDN with `publicCacheHeaders()`
-  (`app/lib/http.server.ts`): `Netlify-CDN-Cache-Control: public, durable, …`
+- Cache public responses on Netlify's CDN with `ctx.json(body, { cache: {…} })`
+  (`publicCacheHeaders()` in `app/lib/http.server.ts`): `Netlify-CDN-Cache-Control: public, durable, …`
   plus `Netlify-Vary: query=shop|<params>`. Shopify's signature params change
   on every request, so without `Netlify-Vary` nothing would ever hit the cache.
 - Safe to cache: `care_plans` (per shop + product), `catalog_search` (per shop
@@ -63,6 +63,50 @@ Netlify Function invocation, billed and with a cold-start risk.
   shop/product **metafields** read by Liquid, so no proxy call happens at all.
   Consider this for Care plan eligibility.
 - Webhooks: ack and enqueue (one function + one background invocation each).
+
+## App Proxy routes
+
+Every storefront endpoint is a React Router resource route
+`app/routes/proxy.<path>.tsx` built with `proxyRoute` from
+`app/lib/app-proxy.server.ts` (example: `app/routes/proxy.ping.tsx`):
+
+```ts
+export const loader = proxyRoute(
+  { throttle: { name: "catalog", perIp: 60, perShop: 1200, periodSeconds: 60 } },
+  async (ctx) => ctx.json({ ok: true, results }, { cache: { maxAge: 300, varyOn: ["q"], tags: [`shop:${ctx.shop}`] } }),
+);
+export const action = proxyRoute({ throttle: { ... } }, async (ctx) => {
+  const customerId = await ctx.currentCustomerId();
+  return ctx.json({ ok: true }, { cache: "no-store" });
+});
+```
+
+- **Signature**: `authenticate.public.appProxy` (sorted params, hex HMAC-SHA256,
+  constant-time; also rejects timestamps more than 90 s off, which Rails
+  didn't). A bad signature throws 400 (Rails: 403). A shop without an offline
+  session gets 404 unless `allowUninstalled`.
+- **Context**: `shop`, `session`, `admin`, `storefront`, `pathPrefix` (use it
+  for links; never hardcode `/apps/repairs`), `params`, and
+  `currentCustomerId()`: `logged_in_customer_id`, else a valid signed customer
+  token (24 h TTL, 5 min skew). Never a bare `customer_id`.
+- **Caching** is chosen per response: `"no-store"` for anything per customer,
+  POSTs and errors; public options only for GETs identical for every visitor.
+  `ctx.json` throws if a response that called `currentCustomerId()` (or a
+  non-GET) asks to be cached. `varyOn` must list every query param the body
+  depends on; `shop` is always included (`Netlify-Vary: query=shop|…`), so the
+  rotating `signature`/`timestamp` don't split the cache.
+  A cache hit never reaches the function, so it skips the signature check and
+  the throttle. https://docs.netlify.com/build/caching/caching-overview/
+- **Liquid pages**: `ctx.liquid(html, { layout })` (`application/liquid`,
+  no-store); escape every value with `liquidText`.
+- **Throttle** (`throttle` option): fixed window, per shop + IP and per shop.
+  The IP is the first `X-Forwarded-For` entry (Shopify's documented shopper
+  IP), then `x-nf-client-connection-ip`: on proxy traffic the Netlify
+  connecting IP is Shopify's, shared by every shopper.
+- **Wiring / tests**: `configureAppProxy({...})` swaps `customerSigningKey`,
+  `rememberPathPrefix`, `throttleStore`, `authenticate`, `now`; it returns a
+  restore function. Integration tests use `appProxyRequest()` from
+  `test/support/shopify-requests.ts`.
 
 ## Notifications (v2 design)
 
@@ -298,7 +342,7 @@ the model layer.
 | `app/services/repairs/webhook_delivery.rb` | app/services/repairs/webhook-delivery.server.ts | todo |  |
 | `app/services/shopify/admin_api.rb` | app/services/shopify/admin-api.server.ts | todo | → thin wrapper over `admin.graphql` / `unauthenticated.admin(shop)`; tests use test/support/fake-graphql.ts |
 | `app/services/shopify/customer_signing_key.rb` | app/services/shopify/customer-signing-key.server.ts | todo | uses encryption.server.ts |
-| `app/services/shopify/customer_token.rb` | app/services/shopify/customer-token.server.ts | todo |  |
+| `app/services/shopify/customer_token.rb` | app/services/shopify/customer-token.server.ts | done | takes the key instead of the shop; the key lookup is injected (`AppProxyDeps.customerSigningKey`) |
 | `app/services/shopify/discount_codes.rb` | app/services/shopify/discount-codes.server.ts | todo |  |
 | `app/services/shopify/gid.rb` | app/services/shopify/gid.server.ts | done | `numericId` / `buildGid`; no Rails test |
 | `app/services/trade_ins/credit_issuer.rb` | app/services/trade_ins/credit-issuer.server.ts | todo |  |
@@ -313,7 +357,7 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/controllers/proxy/base_controller.rb` | app/lib/app-proxy.server.ts | todo | `authenticate.public.appProxy` + cache helpers (done: pattern in proxy.ping.tsx) |
+| `app/controllers/proxy/base_controller.rb` | app/lib/app-proxy.server.ts | wip | `authenticateProxy` + `proxyRoute` done (see [App Proxy routes](#app-proxy-routes)); needs integration wiring: `customerSigningKey`, `rememberPathPrefix`, Postgres throttle store |
 | `app/controllers/proxy/care_controller.rb` | app/routes/proxy.care_plans.tsx, proxy.care_offers.tsx | todo | care_plans is public per product → CDN-cacheable (Netlify-Vary: query=shop\|product_id); care_offers is per customer → no-store |
 | `app/controllers/proxy/catalog_controller.rb` | app/routes/proxy.catalog_search.tsx | todo | public catalogue facts → CDN-cacheable on query; keep throttling |
 | `app/controllers/proxy/intake_controller.rb` | app/routes/proxy.intake.tsx | todo | POST multipart; photos → storage.server.ts |
@@ -331,7 +375,7 @@ the model layer.
 | `app/controllers/application_controller.rb` | app/routes/app.tsx / app/shopify.server.ts | todo | → app/root.tsx / shopify.server.ts |
 | `app/controllers/authenticated_controller.rb` | app/routes/app.tsx / app/shopify.server.ts | todo | → `authenticate.admin` in app/routes/app.tsx loader |
 | `app/controllers/care_plans_controller.rb` | app/routes/app.care_plans*.tsx | todo |  |
-| `app/controllers/concerns/proxy_throttling.rb` | app/lib/proxy-throttling.server.ts | todo | Rails.cache counters → Postgres upsert counter table (functions share no memory); or Netlify function rate limiting — decide |
+| `app/controllers/concerns/proxy_throttling.rb` | app/lib/proxy-throttling.server.ts | wip | decided: Postgres upsert counter (`postgresThrottleStore`); table pending in `prisma/pending/proxy_throttles.sql` until added to the schema; prune old rows daily |
 | `app/controllers/items_controller.rb` | app/routes/app.items*.tsx | todo |  |
 | `app/controllers/part_imports_controller.rb` | app/routes/app.part_imports*.tsx | todo |  |
 | `app/controllers/part_variants_controller.rb` | app/routes/app.part_variants*.tsx | todo |  |
@@ -420,7 +464,7 @@ the model layer.
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
 | `app/helpers/items_helper.rb` | app/lib/items-format.ts | todo |  |
-| `app/helpers/liquid_helper.rb` | app/lib/liquid-format.ts | todo |  |
+| `app/helpers/liquid_helper.rb` | app/lib/http.server.ts (`liquidText`, `liquidResponse`) | done | |
 | `app/helpers/parts_helper.rb` | app/lib/parts-format.ts | todo |  |
 | `app/helpers/tickets_helper.rb` | app/lib/tickets-format.ts | todo |  |
 | `app/helpers/trade_ins_helper.rb` | app/lib/trade-ins-format.ts | todo |  |
@@ -484,7 +528,7 @@ the model layer.
 | `test/services/repairs/webhook_delivery_test.rb` | test/integration/services/repairs/webhook-delivery.test.ts | todo |  |
 | `test/services/shopify/admin_api_test.rb` | test/integration/services/shopify/admin-api.test.ts | todo |  |
 | `test/services/shopify/customer_signing_key_test.rb` | test/integration/services/shopify/customer-signing-key.test.ts | todo |  |
-| `test/services/shopify/customer_token_test.rb` | test/integration/services/shopify/customer-token.test.ts | todo |  |
+| `test/services/shopify/customer_token_test.rb` | test/unit/customer-token.test.ts | done | "encrypted at rest" case moves to the Shop model port; proxy_orders token cases are in test/unit/app-proxy.test.ts |
 | `test/services/trade_ins/trade_ins_test.rb` | test/integration/services/trade_ins/trade-ins.test.ts | todo |  |
 | `test/services/warranty/cover_assigner_test.rb` | test/integration/services/warranty/cover-assigner.test.ts | todo |  |
 

@@ -3,16 +3,27 @@
 
 generator client {
   provider = "prisma-client-js"
+  // "native" for local dev/CI; rhel-openssl-3.0.x for Netlify Functions
+  // (AWS Lambda, Amazon Linux 2023).
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 // Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+// Postgres everywhere: a local Docker container in dev/test, a service
+// container in CI, and Neon (via Netlify DB or directly) in production.
+// DATABASE_URL is the runtime URL (Neon's *pooled* endpoint in production);
+// DIRECT_URL is the unpooled endpoint that `prisma migrate` needs. Locally
+// both point at the same database.
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
+// Used by @shopify/shopify-app-session-storage-prisma. Domain models are
+// ported later (see docs/PORTING.md) once the Rails schema settles.
 model Session {
   id            String    @id
   shop          String

@@ -9,13 +9,24 @@
  * Adapters (EMAIL_ADAPTER):
  *   resend  default when RESEND_API_KEY is set
  *   log     default otherwise (dev/test): prints a one-line summary and keeps
- *           every message in memory so tests can assert on it
+ *           every message in memory (attachments included) so tests can
+ *           assert on it
  *
  * This module only delivers mail. Templates, per-shop settings, consent checks
  * and the notification_deliveries idempotency record belong to the
  * notifications service that calls it.
  */
 import { Resend } from "resend";
+
+/** A file sent with the email, e.g. a postage slip PDF. */
+export interface EmailAttachment {
+  filename: string;
+  content: Uint8Array;
+  contentType: string;
+}
+
+/** Providers cap the whole message (Resend: 40 MB); stay well under. */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 export interface EmailMessage {
   /** The shop the email is sent for (used for tagging and logs). */
@@ -34,6 +45,7 @@ export interface EmailMessage {
   idempotencyKey: string;
   /** Extra headers, e.g. List-Unsubscribe on marketing email. */
   headers?: Record<string, string>;
+  attachments?: EmailAttachment[];
 }
 
 export interface EmailResult {
@@ -90,7 +102,10 @@ export class LogEmailAdapter implements EmailAdapter {
     this.sent.push({ ...message, id });
     if (!this.quiet) {
       console.info(
-        `[email:log] ${id} to=${[message.to].flat().join(",")} subject=${JSON.stringify(message.subject)} key=${message.idempotencyKey}`,
+        `[email:log] ${id} to=${[message.to].flat().join(",")} subject=${JSON.stringify(message.subject)} key=${message.idempotencyKey}` +
+          (message.attachments?.length
+            ? ` attachments=${message.attachments.map((file) => `${file.filename}(${file.content.byteLength}B)`).join(",")}`
+            : ""),
       );
     }
     return { id, adapter: this.name };
@@ -128,6 +143,15 @@ export class ResendEmailAdapter implements EmailAdapter {
           replyTo: message.replyTo,
           tags,
           headers: message.headers,
+          ...(message.attachments?.length
+            ? {
+                attachments: message.attachments.map((file) => ({
+                  filename: file.filename,
+                  content: Buffer.from(file.content),
+                  contentType: file.contentType,
+                })),
+              }
+            : {}),
         },
         { idempotencyKey: message.idempotencyKey },
       );
@@ -187,6 +211,9 @@ export async function sendEmail(message: EmailMessage): Promise<EmailResult> {
     throw new Error("sendEmail needs an idempotencyKey.");
   if ([message.to].flat().length === 0)
     throw new Error("sendEmail needs a recipient.");
+  const attached = (message.attachments ?? []).reduce((sum, file) => sum + file.content.byteLength, 0);
+  if (attached > MAX_ATTACHMENT_BYTES)
+    throw new EmailDeliveryError(`Attachments too large (${attached} bytes).`, false);
   const headers = message.headers
     ? Object.fromEntries(
         Object.entries(message.headers).map(([name, value]) => [

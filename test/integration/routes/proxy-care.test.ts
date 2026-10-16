@@ -5,7 +5,7 @@
  */
 import type { CarePlan, Shop } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { addDays } from "../../../app/lib/dates";
+import { addDays, addMonths } from "../../../app/lib/dates";
 import { updateCarePlan } from "../../../app/models/care-plan.server";
 import { loader as carePlans } from "../../../app/routes/proxy.care_plans";
 import { loader as careOffers } from "../../../app/routes/proxy.care_offers";
@@ -108,6 +108,10 @@ describe("Care on the storefront (App Proxy)", () => {
     expect(Object.keys(offer)).toEqual(["item_id", "product_title", "order_name", "purchased_at", "plans"]);
     expect(offer.order_name).toBeNull();
     expect(offer.plans[0].offer_ends).toBe(addDays(item.purchasedAt!, 30).toISOString().slice(0, 10));
+    // Care added later runs from the purchase date (the order confirmation's Care section shows it).
+    expect((offer.plans[0] as unknown as { cover_ends: string }).cover_ends).toBe(
+      addMonths(item.purchasedAt!, 24).toISOString().slice(0, 10),
+    );
     expect(offer.plans[0].terms[0]).toContain("All repairs to your Boot for 2 years");
   });
 

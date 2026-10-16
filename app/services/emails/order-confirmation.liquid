@@ -1,0 +1,96 @@
+{%- comment -%}
+  ShopCare: paste this into Settings → Notifications → Customer notifications →
+  Order confirmation → Edit code, where you want it to appear (for example just
+  above the order summary). It shows nothing on ordinary orders.
+
+  - Repair orders (from a ShopCare quote): how to send the item in, with the
+    workshop address, the posting instructions, a "Download your postage slip"
+    link, the repair number and a link to the repair status page.
+  - Orders with a ShopCare Care plan: what the plan covers and until when.
+
+  ShopCare puts the repair details on the order as attributes before it is
+  created, and the theme puts the Care details on the Care line as properties,
+  so everything is there when Shopify sends this email.
+{%- endcomment -%}
+{%- assign shopcare_ticket = attributes.repair_ticket_id -%}
+{%- if shopcare_ticket != blank -%}
+<table class="row" style="width: 100%; border-spacing: 0; border-collapse: collapse; margin: 24px 0;">
+  <tr>
+    <td style="padding: 16px; border: 1px solid #e5e5e5; border-radius: 8px;">
+      <h2 style="font-size: 18px; margin: 0 0 8px;">Your repair #{{ shopcare_ticket }}</h2>
+      {%- if attributes.shopcare_item_received == "yes" -%}
+      <p style="margin: 0 0 8px;">We already have your item, so we'll start the repair now.</p>
+      {%- elsif attributes.shopcare_postage_slip_url != blank -%}
+      <p style="margin: 0 0 8px;">Please send your item to us so we can repair it. Print the postage slip, stick the address label on the parcel and put the packing slip inside.</p>
+      <p style="margin: 0 0 16px;">
+        <a href="{{ attributes.shopcare_postage_slip_url }}" style="display: inline-block; padding: 12px 20px; border-radius: 4px; background: #1a1a1a; color: #ffffff; text-decoration: none;">Download your postage slip</a>
+      </p>
+      <p style="margin: 0 0 4px;"><strong>Send it to</strong></p>
+      <p style="margin: 0 0 12px;">{{ attributes.shopcare_workshop_address | escape | newline_to_br }}</p>
+      {%- if attributes.shopcare_posting_instructions != blank -%}
+      <p style="margin: 0 0 12px;">{{ attributes.shopcare_posting_instructions | escape | newline_to_br }}</p>
+      {%- endif -%}
+      <p style="margin: 0 0 8px;">Write your repair number, #{{ shopcare_ticket }}, on the parcel if you can't print the slip.</p>
+      {%- else -%}
+      <p style="margin: 0 0 8px;">We'll be in touch soon about sending your item to us. Your repair number is #{{ shopcare_ticket }}.</p>
+      {%- endif -%}
+      {%- if attributes.shopcare_status_url != blank -%}
+      <p style="margin: 0;"><a href="{{ attributes.shopcare_status_url }}">Follow your repair</a></p>
+      {%- endif -%}
+    </td>
+  </tr>
+</table>
+{%- endif -%}
+{%- assign shopcare_months = "January,February,March,April,May,June,July,August,September,October,November,December" | split: "," -%}
+{%- for line in line_items -%}
+  {%- assign shopcare_for = "" -%}
+  {%- assign shopcare_item = "" -%}
+  {%- assign shopcare_term = 0 -%}
+  {%- assign shopcare_ends = "" -%}
+  {%- assign shopcare_product = "" -%}
+  {%- for property in line.properties -%}
+    {%- case property.first -%}
+      {%- when "_shopcare_for" -%}{%- assign shopcare_for = property.last | append: "" -%}
+      {%- when "_shopcare_item" -%}{%- assign shopcare_item = property.last | append: "" -%}
+      {%- when "_shopcare_term_months" -%}{%- assign shopcare_term = property.last | plus: 0 -%}
+      {%- when "_shopcare_cover_ends" -%}{%- assign shopcare_ends = property.last -%}
+      {%- when "Product" -%}{%- assign shopcare_product = property.last -%}
+    {%- endcase -%}
+  {%- endfor -%}
+  {%- if shopcare_for == blank and shopcare_item == blank -%}{%- continue -%}{%- endif -%}
+  {%- if shopcare_product == blank and shopcare_for != blank -%}
+    {%- for other in line_items -%}
+      {%- assign other_variant = other.variant_id | append: "" -%}
+      {%- if other_variant == shopcare_for -%}{%- assign shopcare_product = other.product.title | default: other.title -%}{%- break -%}{%- endif -%}
+    {%- endfor -%}
+  {%- endif -%}
+  {%- if shopcare_ends != blank -%}
+    {%- assign shopcare_until = shopcare_ends | date: "%-d %B %Y" -%}
+  {%- elsif shopcare_term > 0 -%}
+    {%- assign shopcare_index = created_at | date: "%m" | plus: 0 | minus: 1 | plus: shopcare_term -%}
+    {%- assign shopcare_add = shopcare_index | divided_by: 12 | floor -%}
+    {%- assign shopcare_year = created_at | date: "%Y" | plus: shopcare_add -%}
+    {%- assign shopcare_month = shopcare_index | modulo: 12 -%}
+    {%- assign shopcare_until = created_at | date: "%-d" | append: " " | append: shopcare_months[shopcare_month] | append: " " | append: shopcare_year -%}
+  {%- else -%}
+    {%- assign shopcare_until = "" -%}
+  {%- endif -%}
+  {%- assign shopcare_years = shopcare_term | modulo: 12 -%}
+  {%- if shopcare_term > 0 and shopcare_years == 0 -%}
+    {%- assign shopcare_count = shopcare_term | divided_by: 12 | floor -%}
+    {%- assign shopcare_length = shopcare_count | append: " year" -%}
+  {%- elsif shopcare_term > 0 -%}
+    {%- assign shopcare_length = shopcare_term | append: " month" -%}
+  {%- else -%}
+    {%- assign shopcare_length = "" -%}
+  {%- endif -%}
+<table class="row" style="width: 100%; border-spacing: 0; border-collapse: collapse; margin: 24px 0;">
+  <tr>
+    <td style="padding: 16px; border: 1px solid #e5e5e5; border-radius: 8px;">
+      <h2 style="font-size: 18px; margin: 0 0 8px;">{{ line.title | escape }}</h2>
+      <p style="margin: 0 0 8px;">Your ShopCare{% if shopcare_length != blank %} {{ shopcare_length }}{% endif %} plan covers all repairs{% if shopcare_product != blank %} to your {{ shopcare_product | escape }}{% endif %}{% if shopcare_until != blank %} until {{ shopcare_until }}{% endif %}, except the exclusions in the plan's terms. To use it, ask us for a repair from our website.</p>
+      <p style="margin: 0; color: #707070; font-size: 13px;">This plan is in addition to, and does not affect, your statutory rights.</p>
+    </td>
+  </tr>
+</table>
+{%- endfor -%}

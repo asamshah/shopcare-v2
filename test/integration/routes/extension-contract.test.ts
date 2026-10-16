@@ -70,7 +70,7 @@ const STATUS = { ok: true, logged_in: true, tickets: [
   { id: 10, status: "awaiting_item", status_label: "Awaiting item", product_title: "Loafer", quotation: { status: "paid", currency: "GBP", subtotal: "30.00" }, postage_slip_url: "/apps/repairs/tickets/10/postage-slip?expires=1793000000&token=abc" },
 ] };
 const CARE_OFFERS = { ok: true, logged_in: true, currency: "GBP", items: [
-  { item_id: 3, product_title: "Aria Boot", plans: [Object.assign({}, PLAN, { badge: "ShopCare – 2 year plan", offer_ends: "2026-11-01" })] },
+  { item_id: 3, product_title: "Aria Boot", plans: [Object.assign({}, PLAN, { badge: "ShopCare – 2 year plan", offer_ends: "2026-11-01", cover_ends: "2028-10-02" })] },
 ] };
 
 // --- shape check -----------------------------------------------------------------

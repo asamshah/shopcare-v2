@@ -3,7 +3,7 @@
  * `plan_json` / `offer_json`): the PDP offer and "Add Care later".
  */
 import type { CarePlan, Shop } from "@prisma/client";
-import { addDays } from "../../lib/dates";
+import { addDays, addMonths } from "../../lib/dates";
 import {
   badgeLabel,
   carePlanPriority,
@@ -56,6 +56,9 @@ export function offerJson(item: ItemWithCovers, plans: CarePlan[], currency: str
     plans: plans.map((plan) => ({
       ...planJson(plan, { currency, product: item.productTitle }),
       offer_ends: isoDate(addDays(item.purchasedAt!, plan.offerWindowDays)),
+      // Care added later runs from the purchase date; the cart line carries
+      // this for the order confirmation's Care section.
+      cover_ends: isoDate(addMonths(item.purchasedAt!, plan.termMonths)),
     })),
   };
 }

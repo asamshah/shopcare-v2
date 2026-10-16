@@ -363,7 +363,7 @@
         if (!chosen) return;
         covered[String(parentId)] = true;
         context.extra.push({ id: Number(chosen.variant_id), quantity: context.product.quantity, parent_id: parentId,
-                             properties: { _shopcare_for: String(parentId) } });
+                             properties: { _shopcare_for: String(parentId), _shopcare_term_months: String(chosen.term_months) } });
       }
     });
     if (!registered) { settle(false); return; }
@@ -425,7 +425,11 @@
       button.disabled = true;
       showError(root, "");
       addToCart(root.getAttribute("data-cart-add-url"), [
-        { id: Number(plan.variant_id), quantity: 1, properties: { _shopcare_item: String(item.item_id), Product: item.product_title } }
+        { id: Number(plan.variant_id), quantity: 1, properties: {
+          _shopcare_item: String(item.item_id), Product: item.product_title,
+          // For the Care section of Shopify's order confirmation email.
+          _shopcare_term_months: String(plan.term_months), _shopcare_cover_ends: plan.cover_ends || ""
+        } }
       ])
         .then(function (response) { button.textContent = "Added"; showCart(response, root.getAttribute("data-cart-url")); })
         .catch(function (error) { showError(root, error.message); button.disabled = false; });

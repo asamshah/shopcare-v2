@@ -117,7 +117,7 @@ async function pdpJourney() {
   assert.ok(env.calls.every((c) => !/customer_id/.test(c.url)), "no customer id in proxy URLs");
   const [product, careLine] = cartBody.items;
   assert.deepStrictEqual(product.properties, { Engraving: "AB" });
-  assert.deepStrictEqual(careLine, { id: 7001, quantity: 1, parent_id: 100, properties: { _shopcare_for: "100" } });
+  assert.deepStrictEqual(careLine, { id: 7001, quantity: 1, parent_id: 100, properties: { _shopcare_for: "100", _shopcare_term_months: "24" } });
   assert.strictEqual(env.navigated(), "navigated", "no cart drawer: went to the cart");
 }
 
@@ -180,7 +180,7 @@ async function pdpDawnCart() {
   assert.strictEqual(themeAdds, 0, "theme's add skipped: ShopCare added both lines");
   assert.strictEqual(adds.length, 1);
   assert.deepStrictEqual(adds[0].items, [{ id: 100, quantity: 2, properties: {} },
-    { id: 7001, quantity: 2, parent_id: 100, properties: { _shopcare_for: "100" } }]);
+    { id: 7001, quantity: 2, parent_id: 100, properties: { _shopcare_for: "100", _shopcare_term_months: "24" } }]);
   assert.deepStrictEqual(adds[0].sections, ["cart-drawer", "cart-icon-bubble"], "asks for the drawer's sections");
   assert.strictEqual(rendered.length, 1, "drawer re-rendered");
   assert.strictEqual(rendered[0].key, "k0", "with the product line");
@@ -559,7 +559,7 @@ async function careLater() {
   let added = null;
   const env = setup(await block("care_add_later"), [
     ["/apps/repairs/care_offers", { ok: true, logged_in: true, currency: "GBP", items: [
-      { item_id: 3, product_title: "Aria Boot", plans: [Object.assign({}, PLAN, { badge: "ShopCare – 2 year plan", offer_ends: "2026-11-01" })] }
+      { item_id: 3, product_title: "Aria Boot", plans: [Object.assign({}, PLAN, { badge: "ShopCare – 2 year plan", offer_ends: "2026-11-01", cover_ends: "2028-10-02" })] }
     ] }],
     ["/cart/add.js", (url, opts) => { added = JSON.parse(opts.body); return { items: [{ key: "k0", id: 7001 }] }; }]
   ]);
@@ -569,7 +569,7 @@ async function careLater() {
   assert.match(row.querySelector("span").textContent, /^ShopCare – 2 year plan · £15 · add by /);
   click(env.window, row.querySelector("button"));
   await tick();
-  assert.deepStrictEqual(added.items, [{ id: 7001, quantity: 1, properties: { _shopcare_item: "3", Product: "Aria Boot" } }]);
+  assert.deepStrictEqual(added.items, [{ id: 7001, quantity: 1, properties: { _shopcare_item: "3", Product: "Aria Boot", _shopcare_term_months: "24", _shopcare_cover_ends: "2028-10-02" } }]);
 }
 
 // Logged-in customers' proxy URLs carry a token Liquid signs with the app's key

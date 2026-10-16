@@ -13,6 +13,8 @@ export interface WizardData {
   plansLabel: string | null;
   partsEnabled: boolean;
   presetMonths: number;
+  /** One line, or null until Settings → Repairs has a complete workshop address. */
+  workshopAddress: string | null;
 }
 
 const STEPS: [number, string][] = [
@@ -91,6 +93,17 @@ export function SetupWizard({ wizard }: { wizard: WizardData }) {
                 </s-button>
               </s-stack>
             </Form>
+            {wizard.workshopAddress ? (
+              <s-text color="subdued">
+                Customers post their items to {wizard.workshopAddress}.{" "}
+                <s-link href="/app/settings">Change</s-link>
+              </s-text>
+            ) : (
+              <s-banner tone="warning">
+                Where should customers post their items? <s-link href="/app/settings">Add your workshop address</s-link>{" "}
+                in Settings → Repairs, so paid repairs come with a printable postage slip.
+              </s-banner>
+            )}
           </>
         ) : null}
 

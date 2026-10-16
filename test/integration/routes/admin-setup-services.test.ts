@@ -12,7 +12,7 @@ import { loader as ticketsLoader } from "../../../app/routes/app.tickets._index"
 import { action as servicesAction, loader as servicesLoader } from "../../../app/routes/app.repair_services._index";
 import { action as serviceAction, loader as serviceLoader } from "../../../app/routes/app.repair_services.$id";
 import { flash, get, post, signedOut, signInAs, statusOf } from "../../support/admin";
-import { buildWorkshop, createProductGroupFor, createRepairServiceFor, createShop } from "../../support/factories";
+import { buildWorkshop, createProductGroupFor, createRepairServiceFor, createShop, WORKSHOP_SETTINGS } from "../../support/factories";
 import { FakeGraphql } from "../../support/fake-graphql";
 
 type Home = Awaited<ReturnType<typeof ticketsLoader>>;
@@ -41,6 +41,12 @@ describe("setup", () => {
       expect(home.wizard?.step).toBe(step);
     }
     expect((await get<Home>(ticketsLoader, "/app/tickets?setup_step=9")).wizard?.step).toBe(3);
+    // Step 2 asks for the workshop address postage slips need.
+    expect((await get<Home>(ticketsLoader, "/app/tickets?setup_step=2")).wizard?.workshopAddress).toBeNull();
+    await prisma.shop.update({ where: { id: shop.id }, data: { settings: { ...WORKSHOP_SETTINGS } } });
+    expect((await get<Home>(ticketsLoader, "/app/tickets?setup_step=2")).wizard?.workshopAddress).toBe(
+      "Acme Repairs, 4 Cobbler's Yard, Northampton NN1 1AA, United Kingdom",
+    );
 
     const res = await post(setupAction, "/app/setup", { intent: "complete" });
     expect(flash(res)).toEqual({ path: "/app/tickets", notice: "You're all set." });

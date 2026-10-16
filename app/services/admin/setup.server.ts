@@ -9,7 +9,14 @@ import prisma from "../../db.server";
 import { pluralize } from "../../lib/format";
 import { toSentence } from "../../lib/inflections";
 import { productGroupSummary } from "../../models/product-group.server";
-import { needsSetup, partsEnabled, settingsOf, useRepairCollection as rememberRepairCollection } from "../../models/shop.server";
+import {
+  completeWorkshopAddress,
+  needsSetup,
+  partsEnabled,
+  settingsOf,
+  useRepairCollection as rememberRepairCollection,
+  workshopAddressLines,
+} from "../../models/shop.server";
 import { jsonObject, ValidationError } from "../../models/validation.server";
 import { createWarrantyPolicy } from "../../models/warranty-policy.server";
 import type { AdminGraphqlClient } from "../../shopify/graphql.server";
@@ -45,6 +52,10 @@ export async function wizardData(shop: Shop, rawStep: string | null) {
     plansLabel: plansCount ? pluralize(plansCount, "Care plan") : null,
     partsEnabled: partsEnabled(shop),
     presetMonths: WARRANTY_PRESET_MONTHS,
+    workshopAddress: (() => {
+      const address = completeWorkshopAddress(shop);
+      return address ? workshopAddressLines(address).join(", ") : null;
+    })(),
   };
 }
 

@@ -19,6 +19,7 @@ import {
   shopSecret,
   shopSecretData,
   tradeInEnabled,
+  WORKSHOP_ADDRESS_FIELDS,
 } from "../../models/shop.server";
 import { d, jsonObject } from "../../models/validation.server";
 import { EMAIL_KINDS } from "../notifications/events.server";
@@ -85,6 +86,15 @@ export async function saveSettings(
       subject: field(form, "email[subject]").slice(0, 255),
       body: field(form, "email[body]").slice(0, 5000),
     };
+  }
+  // Where customers post their items (postage slips).
+  if (has(form, "workshop_address[name]")) {
+    next.workshop_address = Object.fromEntries(
+      WORKSHOP_ADDRESS_FIELDS.map((key) => [key, field(form, `workshop_address[${key}]`).trim().slice(0, 255)]),
+    );
+  }
+  if (has(form, "posting_instructions")) {
+    next.posting_instructions = field(form, "posting_instructions").trim().slice(0, 2000);
   }
   if (has(form, "parts_enabled")) next.parts_enabled = bool(form, "parts_enabled");
   if (has(form, "parts[labour_rate]")) {

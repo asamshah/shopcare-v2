@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import prisma from "../../../app/db.server";
 import {
   careSettings,
+  completeWorkshopAddress,
+  DEFAULT_POSTING_INSTRUCTIONS,
+  postingInstructions,
   labourRate,
   careOfferDelayDays,
   notificationsSettings,
@@ -282,5 +285,48 @@ describe("settings", () => {
     await createNotificationDeliveryFor(other, { status: "sent" });
     const data = await show();
     expect(data.deliveries.map((d) => [d.channel, d.statusLabel, d.error])).toEqual([["Email", "Failed", "Bounced"]]);
+  });
+
+  it("saves the workshop address and posting instructions, and says when the address is incomplete", async () => {
+    const shop = await setup();
+    let data = await show();
+    expect(data.workshopAddressComplete).toBe(false);
+    expect(data.workshopAddress).toEqual({ name: "", line1: "", line2: "", city: "", postcode: "", country: "" });
+
+    const res = await save({
+      "workshop_address[name]": " Acme Repairs ",
+      "workshop_address[line1]": "4 Cobbler's Yard",
+      "workshop_address[line2]": "",
+      "workshop_address[city]": "Northampton",
+      "workshop_address[postcode]": "NN1 1AA",
+      "workshop_address[country]": "United Kingdom",
+      posting_instructions: "Use Royal Mail Tracked 48.",
+    });
+    expect(flash(res).notice).toBe("Settings saved.");
+    const saved = await reload(shop.id);
+    expect(completeWorkshopAddress(saved)).toEqual({
+      name: "Acme Repairs", line1: "4 Cobbler's Yard", line2: "", city: "Northampton", postcode: "NN1 1AA", country: "United Kingdom",
+    });
+    expect(postingInstructions(saved)).toBe("Use Royal Mail Tracked 48.");
+    data = await show();
+    expect(data.workshopAddressComplete).toBe(true);
+
+    // A blank instruction falls back to the default; a missing postcode makes the address incomplete.
+    await save({ "workshop_address[name]": "Acme Repairs", "workshop_address[line1]": "4 Cobbler's Yard", posting_instructions: "" });
+    const partial = await reload(shop.id);
+    expect(completeWorkshopAddress(partial)).toBeNull();
+    expect(postingInstructions(partial)).toBe(DEFAULT_POSTING_INSTRUCTIONS);
+    expect((await show()).workshopAddressComplete).toBe(false);
+  });
+
+  it("lists the postage emails with the other customer emails", async () => {
+    await setup();
+    const kinds = (await show()).notifications.emails.map((e) => [e.kind, e.label, e.enabled]);
+    expect(kinds).toEqual(
+      expect.arrayContaining([
+        ["send_item", "Send your item to us", true],
+        ["item_received", "We've received your item", true],
+      ]),
+    );
   });
 });

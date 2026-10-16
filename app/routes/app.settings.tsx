@@ -12,6 +12,9 @@ import { RECENT_ORDER as DELIVERIES_ORDER } from "../models/notification-deliver
 import {
   careOfferDelayDays,
   careSettings,
+  completeWorkshopAddress,
+  DEFAULT_POSTING_INSTRUCTIONS,
+  workshopAddress,
   notificationsSettings,
   partsEnabled,
   partsSettings,
@@ -81,6 +84,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     repairOrderTag: text(settings.repair_order_tag),
     currency: text(settings.currency),
     quoteValidDays: quoteValidDays(shop),
+    workshopAddress: workshopAddress(shop),
+    workshopAddressComplete: completeWorkshopAddress(shop) !== null,
+    postingInstructions: text(settings.posting_instructions),
+    defaultPostingInstructions: DEFAULT_POSTING_INSTRUCTIONS,
     email: { subject: text(email.subject), body: text(email.body) },
     shopName: text(settings.shop_name) || "your store",
     partsEnabled: partsEnabled(shop),
@@ -217,6 +224,50 @@ export default function Settings() {
                   details="How long a customer has to pay (accept) a quote's invoice before it expires and stops working."
                 ></s-number-field>
               </s-grid>
+
+              <s-heading>Workshop address</s-heading>
+              <s-paragraph color="subdued">
+                Where customers post their items. Once a quote is paid (or covered), ShopCare emails the customer a
+                postage slip to print: an address label for the parcel and a packing slip to put inside. Customers pay
+                their own postage.
+              </s-paragraph>
+              {d.workshopAddressComplete ? null : (
+                <s-banner tone="warning">
+                  Add the workshop&apos;s name, address, town, postcode and country. Until then no postage slips are
+                  sent.
+                </s-banner>
+              )}
+              <s-grid grid-template-columns="1fr 1fr" gap="small-200">
+                <s-text-field
+                  label="Name"
+                  name="workshop_address[name]"
+                  value={d.workshopAddress.name}
+                  placeholder="Acme Repairs"
+                  details="The first line of the label, e.g. your workshop or company name."
+                ></s-text-field>
+                <s-text-field
+                  label="Country"
+                  name="workshop_address[country]"
+                  value={d.workshopAddress.country}
+                  placeholder="United Kingdom"
+                ></s-text-field>
+                <s-text-field label="Address" name="workshop_address[line1]" value={d.workshopAddress.line1}></s-text-field>
+                <s-text-field
+                  label="Address line 2 (optional)"
+                  name="workshop_address[line2]"
+                  value={d.workshopAddress.line2}
+                ></s-text-field>
+                <s-text-field label="Town or city" name="workshop_address[city]" value={d.workshopAddress.city}></s-text-field>
+                <s-text-field label="Postcode" name="workshop_address[postcode]" value={d.workshopAddress.postcode}></s-text-field>
+              </s-grid>
+              <s-text-area
+                label="Posting instructions"
+                name="posting_instructions"
+                rows={3}
+                value={d.postingInstructions}
+                placeholder={d.defaultPostingInstructions}
+                details="Printed on the postage slip and in the email. Leave blank to use ours."
+              ></s-text-area>
             </s-stack>
           </s-section>
 

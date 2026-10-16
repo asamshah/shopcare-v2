@@ -33,10 +33,10 @@ the row in the same commit as the code.
 | `config/initializers/shopify_app.rb` (runtime webhooks) | `[[webhooks.subscriptions]]` in `shopify.app.toml` | done | app/uninstalled, orders/paid, refunds/create, 3 compliance topics; API version 2025-10 → 2026-10 |
 | `config/initializers/shopify_app.rb` (`after_authenticate_job`) | `hooks.afterAuth` in `app/shopify.server.ts` | todo | enqueue the order backfill |
 | `config/routes.rb` | `app/routes/*` (flat routes) | todo | proxy paths unchanged: `/proxy/intake`, `/proxy/status`, `/proxy/quotes/:token` (+ `/decline`), `/proxy/orders`, `/proxy/catalog_search`, `/proxy/order_lookup`, `/proxy/care_plans`, `/proxy/care_offers`, `/proxy/trade_in_options`, `/proxy/trade_ins` |
-| `db/schema.rb` + `db/migrate/*` (26) | `prisma/schema.prisma` + `prisma/migrations/` | todo | port once the Rails schema settles; only `Session` exists so far. Tables: shops, repair_tickets, ticket_images, ticket_activities, ticket_parts, quotations, quotation_line_items, items, covers, registrations, warranty_policies, product_groups, parts, part_variants, part_imports, stock_movements, repair_services, service_components, care_plans, care_credits, processed_refunds, trade_in_programs, trade_ins, notification_deliveries (+ new email settings) |
+| `db/schema.rb` + `db/migrate/*` (26) | `prisma/schema.prisma` + `prisma/migrations/` | done | every domain table in one migration (`…_domain_schema`) on top of the template's `Session` migration; see [Schema notes](#schema-notes). Email settings go in `shops.settings` when the notifications are built |
 | `config/recurring.yml` `expire_quotes` (daily 3am) | `netlify/functions/expire-quotes.mts` | todo | template: `netlify/functions/daily-example.mts` |
 | `config/storage.yml` (Disk / S3) | `app/lib/storage.server.ts` | done | Netlify Blobs; signed URLs served by `app/routes/files.$.tsx` |
-| `Shop` `encrypts` | `app/lib/encryption.server.ts` | done | key rotation via `APP_ENCRYPTION_PREVIOUS_KEYS` |
+| `Shop` `encrypts` | `app/lib/encryption.server.ts` | done | key rotation via `APP_ENCRYPTION_PREVIOUS_KEYS`; `*_ciphertext` columns, read/written with `shopSecret` / `setShopSecret` in `app/models/shop.server.ts` |
 | `config/initializers/content_security_policy.rb` | `addDocumentResponseHeaders` (library) | done | the library sets frame-ancestors |
 | `test/storefront` CI job | `.github/workflows/ci.yml` | todo | add once the storefront journeys are ported |
 | `bin/brakeman`, `bin/rubocop` | `npm run lint`, `npm run typecheck` | done | |
@@ -161,40 +161,95 @@ enables Flow or adds a Klaviyo key, independently of ShopCare's own emails.
   the marketing email; unsubscribing updates Shopify's
   `customerEmailMarketingConsentUpdate` so the store and ShopCare agree.
 
+## Schema notes
+
+Phase 2 (branch `schema`) ported every domain table from `db/schema.rb` and
+the model layer.
+
+- **Names:** tables and columns keep the Rails snake_case names via
+  `@@map`/`@map`; Prisma fields are camelCase. Index names are the Rails ones.
+  JSON contents (settings, terms, perks, grades…) keep their Rails keys.
+- **Types:** `bigint` ids → `Int` autoincrement (int4; plenty for one shop's
+  data, and it avoids JS `BigInt` everywhere). `decimal(p,s)` →
+  `Decimal @db.Decimal(p,s)`. `jsonb` → `Json @db.JsonB` with the same
+  defaults. `datetime` → `timestamp(3)` (JS dates have millisecond
+  precision). `string` → `text`. Rails enums stay string columns; the values
+  are `as const` arrays + TS unions in each `app/models/*` module.
+- **Hand-written SQL** in the migration (Prisma can't express it, and its
+  diff ignores it, so `migrate dev` stays clean): partial unique indexes
+  `index_covers_on_care_line_unit`,
+  `index_items_on_shop_id_and_order_line_id_and_unit_index`,
+  `index_trade_ins_one_open_per_item`; the expression index
+  `index_product_groups_on_shop_id_and_name` on `(shop_id, lower(name))`;
+  and `DEFERRABLE INITIALLY DEFERRED` on the four restrict foreign keys.
+- **Deletes:** Rails `dependent:` maps to `onDelete`: destroy/delete_all →
+  Cascade, nullify → SetNull, restrict_with_error → NoAction made deferrable
+  (checked at commit, so a shop delete cascades whatever order Postgres runs
+  the cascades in; the model layer still refuses such deletes up front, e.g.
+  `deleteProductGroup`).
+- **Shop:** keyed by `shopify_domain`; no `shopify_token` / `access_scopes`
+  (the template's `Session` table holds tokens and scopes). Encrypted
+  `klaviyo_api_key_ciphertext`, `customer_signing_key_ciphertext` and
+  `webhook_secret_ciphertext` (was plaintext `settings["webhook_secret"]`
+  in Rails), each bound to its column with context `"Shop.<field>"`.
+- **Quotation token:** `decision_token_digest` (SHA-256 hex, as Rails, for
+  lookup) + `decision_token_ciphertext` (to rebuild the review link and to
+  compare in constant time).
+- **Active Storage:** `ticket_images` gets `storage_key`, `filename`,
+  `content_type`, `byte_size`; `registrations` gets `proof_*` columns;
+  `trade_ins.photos` is a jsonb list of `{ key, filename, contentType,
+  byteSize }`. No `active_storage_*` tables.
+- **notification_deliveries** gains v2 columns now: `idempotency_key`,
+  `provider_message_id`, `attempts`, a unique index on
+  `(shop_id, channel, idempotency_key)`, and the `email` channel. Rails'
+  `error` column keeps the last error.
+- **Model layer:** `app/models/<name>.server.ts`, plain functions over Prisma
+  rows. `create*`/`update*` normalise, validate (`Errors` /
+  `ValidationError` in `validation.server.ts`, Rails messages) and save;
+  pure `validate*` functions need no database. `with_lock` →
+  `withRowLock(tx, table, id)` (`SELECT … FOR UPDATE`) inside
+  `inTransaction` (`app/lib/db-lock.server.ts`). Rails search scopes →
+  `*SearchWhere(term)` (ILIKE with wildcards escaped). There are no
+  callbacks: RepairTicket's `after_update_commit` notification becomes
+  `repairStatusChangedEvent(ticket)` for the caller to dispatch.
+- **Data migration from Rails** (not done): Active Record encrypted values
+  must be decrypted in Rails and re-encrypted with the v2 key; ids can be
+  copied as they are.
+
 ## File-by-file checklist (generated from `git ls-tree rails-reference`)
 
 ### Models (28)
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/models/application_record.rb` | app/db.server.ts (Prisma client) | todo |  |
-| `app/models/care_credit.rb` | prisma/schema.prisma `CareCredit` + app/models/care-credit.server.ts | todo |  |
-| `app/models/care_plan.rb` | prisma/schema.prisma `CarePlan` + app/models/care-plan.server.ts | todo |  |
-| `app/models/concerns/product_eligibility.rb` | app/models/product-eligibility.server.ts | todo |  |
-| `app/models/concerns/product_grouped.rb` | app/models/product-grouped.server.ts | todo |  |
-| `app/models/cover.rb` | prisma/schema.prisma `Cover` + app/models/cover.server.ts | todo |  |
-| `app/models/item.rb` | prisma/schema.prisma `Item` + app/models/item.server.ts | todo |  |
-| `app/models/notification_delivery.rb` | prisma/schema.prisma `NotificationDelivery` + app/models/notification-delivery.server.ts | todo | keeps its role as the per-event delivery log + idempotency record; adds channel "email" (see Notifications) |
-| `app/models/part.rb` | prisma/schema.prisma `Part` + app/models/part.server.ts | todo |  |
-| `app/models/part_import.rb` | prisma/schema.prisma `PartImport` + app/models/part-import.server.ts | todo |  |
-| `app/models/part_variant.rb` | prisma/schema.prisma `PartVariant` + app/models/part-variant.server.ts | todo |  |
-| `app/models/processed_refund.rb` | prisma/schema.prisma `ProcessedRefund` + app/models/processed-refund.server.ts | todo |  |
-| `app/models/product_group.rb` | prisma/schema.prisma `ProductGroup` + app/models/product-group.server.ts | todo |  |
-| `app/models/quotation.rb` | prisma/schema.prisma `Quotation` + app/models/quotation.server.ts | todo | `encrypts :decision_token` is looked up by value → store an HMAC digest column for lookup, not GCM ciphertext |
-| `app/models/quotation_line_item.rb` | prisma/schema.prisma `QuotationLineItem` + app/models/quotation-line-item.server.ts | todo |  |
-| `app/models/registration.rb` | prisma/schema.prisma `Registration` + app/models/registration.server.ts | todo | `has_one_attached :proof` → storage key |
-| `app/models/repair_service.rb` | prisma/schema.prisma `RepairService` + app/models/repair-service.server.ts | todo |  |
-| `app/models/repair_ticket.rb` | prisma/schema.prisma `RepairTicket` + app/models/repair-ticket.server.ts | todo |  |
-| `app/models/service_component.rb` | prisma/schema.prisma `ServiceComponent` + app/models/service-component.server.ts | todo |  |
-| `app/models/shop.rb` | prisma/schema.prisma `Shop` + app/models/shop.server.ts | todo | `encrypts` klaviyo_api_key + customer_signing_key → `encryption.server.ts` with context "Shop.<field>" |
-| `app/models/statutory_rights.rb` | prisma/schema.prisma `StatutoryRights` + app/models/statutory-rights.server.ts | todo |  |
-| `app/models/stock_movement.rb` | prisma/schema.prisma `StockMovement` + app/models/stock-movement.server.ts | todo |  |
-| `app/models/ticket_activity.rb` | prisma/schema.prisma `TicketActivity` + app/models/ticket-activity.server.ts | todo |  |
-| `app/models/ticket_image.rb` | prisma/schema.prisma `TicketImage` + app/models/ticket-image.server.ts | todo | ActiveStorage `has_one_attached :file` → `storage.server.ts` key + metadata row |
-| `app/models/ticket_part.rb` | prisma/schema.prisma `TicketPart` + app/models/ticket-part.server.ts | todo |  |
-| `app/models/trade_in.rb` | prisma/schema.prisma `TradeIn` + app/models/trade-in.server.ts | todo | `has_many_attached :photos` → storage keys |
-| `app/models/trade_in_program.rb` | prisma/schema.prisma `TradeInProgram` + app/models/trade-in-program.server.ts | todo |  |
-| `app/models/warranty_policy.rb` | prisma/schema.prisma `WarrantyPolicy` + app/models/warranty-policy.server.ts | todo |  |
+| `app/models/application_record.rb` | app/db.server.ts (Prisma client) | done | Prisma client; shared helpers in app/models/validation.server.ts |
+| `app/models/care_credit.rb` | prisma/schema.prisma `CareCredit` + app/models/care-credit.server.ts | done | |
+| `app/models/care_plan.rb` | prisma/schema.prisma `CarePlan` + app/models/care-plan.server.ts | done | |
+| `app/models/concerns/product_eligibility.rb` | app/models/product-eligibility.server.ts | done | |
+| `app/models/concerns/product_grouped.rb` | app/models/product-grouped.server.ts | done | |
+| `app/models/cover.rb` | prisma/schema.prisma `Cover` + app/models/cover.server.ts | done | `record_claim!` uses withRowLock |
+| `app/models/item.rb` | prisma/schema.prisma `Item` + app/models/item.server.ts | done | cover helpers take the item with its covers loaded (`findItemWithCovers`) |
+| `app/models/notification_delivery.rb` | prisma/schema.prisma `NotificationDelivery` + app/models/notification-delivery.server.ts | done | keeps its role as the per-event delivery log + idempotency record; adds channel "email" (see Notifications) |
+| `app/models/part.rb` | prisma/schema.prisma `Part` + app/models/part.server.ts | done | default variant created in the same transaction (was `after_save`) |
+| `app/models/part_import.rb` | prisma/schema.prisma `PartImport` + app/models/part-import.server.ts | done | `importer` moves to app/services/parts/csv-import |
+| `app/models/part_variant.rb` | prisma/schema.prisma `PartVariant` + app/models/part-variant.server.ts | done | `move_stock!` uses withRowLock |
+| `app/models/processed_refund.rb` | prisma/schema.prisma `ProcessedRefund` + app/models/processed-refund.server.ts | done | |
+| `app/models/product_group.rb` | prisma/schema.prisma `ProductGroup` + app/models/product-group.server.ts | done | |
+| `app/models/quotation.rb` | prisma/schema.prisma `Quotation` + app/models/quotation.server.ts | done | `encrypts :decision_token` → `decision_token_digest` (SHA-256, as Rails, for lookup) + `decision_token_ciphertext` (GCM, for the link and a constant-time compare); `revise!` uses withRowLock |
+| `app/models/quotation_line_item.rb` | prisma/schema.prisma `QuotationLineItem` + app/models/quotation-line-item.server.ts | done | |
+| `app/models/registration.rb` | prisma/schema.prisma `Registration` + app/models/registration.server.ts | done | `has_one_attached :proof` → `proof_key` + `proof_*` metadata columns |
+| `app/models/repair_service.rb` | prisma/schema.prisma `RepairService` + app/models/repair-service.server.ts | done | |
+| `app/models/repair_ticket.rb` | prisma/schema.prisma `RepairTicket` + app/models/repair-ticket.server.ts | done | status-change notification: `repairStatusChangedEvent`, dispatched by callers (no callbacks) |
+| `app/models/service_component.rb` | prisma/schema.prisma `ServiceComponent` + app/models/service-component.server.ts | done | |
+| `app/models/shop.rb` | prisma/schema.prisma `Shop` + app/models/shop.server.ts | done | `encrypts` klaviyo_api_key + customer_signing_key, and the webhook secret (was in settings) → `*_ciphertext` columns, context "Shop.<field>"; no token columns (Session has them) |
+| `app/models/statutory_rights.rb` | app/models/statutory-rights.server.ts | done | a module, not a table |
+| `app/models/stock_movement.rb` | prisma/schema.prisma `StockMovement` + app/models/stock-movement.server.ts | done | |
+| `app/models/ticket_activity.rb` | prisma/schema.prisma `TicketActivity` + app/models/ticket-activity.server.ts | done | |
+| `app/models/ticket_image.rb` | prisma/schema.prisma `TicketImage` + app/models/ticket-image.server.ts | done | ActiveStorage `has_one_attached :file` → `storage_key` + metadata columns (`storage.server.ts`) |
+| `app/models/ticket_part.rb` | prisma/schema.prisma `TicketPart` + app/models/ticket-part.server.ts | done | |
+| `app/models/trade_in.rb` | prisma/schema.prisma `TradeIn` + app/models/trade-in.server.ts | done | `has_many_attached :photos` → `photos` jsonb list of storage keys + metadata |
+| `app/models/trade_in_program.rb` | prisma/schema.prisma `TradeInProgram` + app/models/trade-in-program.server.ts | done | |
+| `app/models/warranty_policy.rb` | prisma/schema.prisma `WarrantyPolicy` + app/models/warranty-policy.server.ts | done | |
 
 ### Services (53)
 
@@ -205,7 +260,7 @@ enables Flow or adds a Klaviyo key, independently of ShopCare's own emails.
 | `app/services/care/notices.rb` | app/services/care/notices.server.ts | todo |  |
 | `app/services/care/plan_economics.rb` | app/services/care/plan-economics.server.ts | todo |  |
 | `app/services/care/plan_refunder.rb` | app/services/care/plan-refunder.server.ts | todo |  |
-| `app/services/care/plan_terms.rb` | app/services/care/plan-terms.server.ts | todo |  |
+| `app/services/care/plan_terms.rb` | app/services/care/plan-terms.server.ts | done | pure function; tests are in care-plan.test.ts (Rails tested it via care_plan_test) |
 | `app/services/care/refund_handler.rb` | app/services/care/refund-handler.server.ts | todo |  |
 | `app/services/items/order_data.rb` | app/services/items/order-data.server.ts | todo |  |
 | `app/services/items/order_importer.rb` | app/services/items/order-importer.server.ts | todo | runs in background job, cursor-paged |
@@ -245,14 +300,14 @@ enables Flow or adds a Klaviyo key, independently of ShopCare's own emails.
 | `app/services/shopify/customer_signing_key.rb` | app/services/shopify/customer-signing-key.server.ts | todo | uses encryption.server.ts |
 | `app/services/shopify/customer_token.rb` | app/services/shopify/customer-token.server.ts | todo |  |
 | `app/services/shopify/discount_codes.rb` | app/services/shopify/discount-codes.server.ts | todo |  |
-| `app/services/shopify/gid.rb` | app/services/shopify/gid.server.ts | todo |  |
+| `app/services/shopify/gid.rb` | app/services/shopify/gid.server.ts | done | `numericId` / `buildGid`; no Rails test |
 | `app/services/trade_ins/credit_issuer.rb` | app/services/trade_ins/credit-issuer.server.ts | todo |  |
 | `app/services/trade_ins/order_linker.rb` | app/services/trade_ins/order-linker.server.ts | todo |  |
 | `app/services/trade_ins/quoter.rb` | app/services/trade_ins/quoter.server.ts | todo |  |
 | `app/services/trade_ins/submission.rb` | app/services/trade_ins/submission.server.ts | todo |  |
 | `app/services/trade_ins/workflow.rb` | app/services/trade_ins/workflow.server.ts | todo |  |
 | `app/services/warranty/cover_assigner.rb` | app/services/warranty/cover-assigner.server.ts | todo |  |
-| `app/services/warranty/product_facts.rb` | app/services/warranty/product-facts.server.ts | todo |  |
+| `app/services/warranty/product_facts.rb` | app/services/warranty/product-facts.server.ts | wip | the `Facts` struct is ported as `ProductFacts` (app/models/product-facts.ts); the Shopify fetch is still todo |
 
 ### Controllers: proxy (storefront) (9)
 
@@ -386,18 +441,18 @@ enables Flow or adds a Klaviyo key, independently of ShopCare's own emails.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `test/models/care_plan_test.rb` | test/integration/models/care-plan.test.ts | todo |  |
-| `test/models/cover_test.rb` | test/integration/models/cover.test.ts | todo |  |
-| `test/models/part_test.rb` | test/integration/models/part.test.ts | todo |  |
-| `test/models/product_group_test.rb` | test/integration/models/product-group.test.ts | todo |  |
-| `test/models/quotation_cover_test.rb` | test/integration/models/quotation-cover.test.ts | todo |  |
-| `test/models/quotation_line_item_test.rb` | test/integration/models/quotation-line-item.test.ts | todo |  |
-| `test/models/quotation_test.rb` | test/integration/models/quotation.test.ts | todo |  |
-| `test/models/repair_ticket_test.rb` | test/integration/models/repair-ticket.test.ts | todo |  |
-| `test/models/ticket_activity_test.rb` | test/integration/models/ticket-activity.test.ts | todo |  |
-| `test/models/ticket_image_test.rb` | test/integration/models/ticket-image.test.ts | todo |  |
-| `test/models/trade_in_program_test.rb` | test/integration/models/trade-in-program.test.ts | todo |  |
-| `test/models/warranty_policy_test.rb` | test/integration/models/warranty-policy.test.ts | todo |  |
+| `test/models/care_plan_test.rb` | test/integration/models/care-plan.test.ts | done | same scenarios |
+| `test/models/cover_test.rb` | test/integration/models/cover.test.ts | done | same scenarios |
+| `test/models/part_test.rb` | test/integration/models/part.test.ts | done | `assert_raises(ArgumentError)` → `rejects.toThrow(ArgumentError)` (class exported by part.server.ts) |
+| `test/models/product_group_test.rb` | test/integration/models/product-group.test.ts | done | same scenarios |
+| `test/models/quotation_cover_test.rb` | test/integration/models/quotation-cover.test.ts | done | same scenarios |
+| `test/models/quotation_line_item_test.rb` | test/integration/models/quotation-line-item.test.ts | done | same scenarios |
+| `test/models/quotation_test.rb` | test/integration/models/quotation.test.ts | done | `token.succ` → last character changed |
+| `test/models/repair_ticket_test.rb` | test/integration/models/repair-ticket.test.ts | done | same scenarios |
+| `test/models/ticket_activity_test.rb` | (none) | done | empty in Rails (no tests); nothing to port |
+| `test/models/ticket_image_test.rb` | (none) | done | empty in Rails (no tests); nothing to port |
+| `test/models/trade_in_program_test.rb` | test/integration/models/trade-in-program.test.ts | done | same scenarios |
+| `test/models/warranty_policy_test.rb` | test/integration/models/warranty-policy.test.ts | done | same scenarios |
 
 ### Tests: services (29)
 

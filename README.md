@@ -27,13 +27,14 @@ sends its own emails, and Flow and Klaviyo become optional integrations.
 ```
 app/
   routes/            React Router routes: app.* (admin), proxy.* (App Proxy), webhooks.*, files.$
-  lib/               infrastructure: encryption, storage, background dispatch, webhooks, http caching
+  models/            one module per Rails model: validations, enums, business rules (plain functions over Prisma rows)
+  lib/               infrastructure: encryption, storage, background dispatch, webhooks, http caching, row locks
   services/          domain services (email.server.ts so far; Rails services are ported here)
   jobs/              background job handlers + registry
   shopify.server.ts  @shopify/shopify-app-react-router setup (Prisma session storage)
   db.server.ts       Prisma client
 netlify/functions/   jobs-background.mts (Background Function), daily-example.mts (Scheduled)
-prisma/              schema + migrations (Postgres; Session only for now)
+prisma/              schema + migrations (Postgres; every Rails table, see docs/PORTING.md#schema-notes)
 extensions/          theme app extension + Flow triggers (copied unchanged from Rails)
 parked/              Flow trigger not yet shipped (trade-in status)
 test/unit/           pure tests

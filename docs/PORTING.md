@@ -24,6 +24,7 @@ the row in the same commit as the code.
 | Minitest + fixtures + mocha | Vitest; `test/support/factories.ts` builders; fakes passed in as dependencies (`vi.fn()` for one-off mocks) |
 | Model/service tests that touch the DB | `test/integration/**` (real Postgres, truncated per test) |
 | Pure logic tests | `test/unit/**` |
+| `Shopify::AdminApi` and every Admin API call in a service | `app/shopify/*.server.ts`: plain functions taking an `AdminGraphqlClient` (`admin` from `authenticate.admin`, or `adminClientForShop(shop)`) and plain inputs, returning typed objects; operations validated against Admin API 2026-10; tests in `test/unit/shopify/` with `FakeGraphql` |
 
 ## Config and infrastructure
 
@@ -311,11 +312,11 @@ the model layer.
 | `app/services/care/credit_issuer.rb` | app/services/care/credit-issuer.server.ts | todo |  |
 | `app/services/care/notices.rb` | app/services/care/notices.server.ts | todo |  |
 | `app/services/care/plan_economics.rb` | app/services/care/plan-economics.server.ts | todo |  |
-| `app/services/care/plan_refunder.rb` | app/services/care/plan-refunder.server.ts | todo |  |
+| `app/services/care/plan_refunder.rb` | app/services/care/plan-refunder.server.ts | wip | Shopify calls done: `refundLineItem` in app/shopify/refunds.server.ts (suggestedRefund + refundCreate); the service builds the note from the cover |
 | `app/services/care/plan_terms.rb` | app/services/care/plan-terms.server.ts | done | pure function; tests are in care-plan.test.ts (Rails tested it via care_plan_test) |
 | `app/services/care/refund_handler.rb` | app/services/care/refund-handler.server.ts | todo |  |
-| `app/services/items/order_data.rb` | app/services/items/order-data.server.ts | todo |  |
-| `app/services/items/order_importer.rb` | app/services/items/order-importer.server.ts | todo | runs in background job, cursor-paged |
+| `app/services/items/order_data.rb` | app/shopify/orders.server.ts | done | `orderFromGraphql` / `orderFromWebhook` → `OrderData`; unit price is a decimal string |
+| `app/services/items/order_importer.rb` | app/services/items/order-importer.server.ts | wip | runs in background job, cursor-paged. Shopify calls done: `fetchCustomerOrder`, `fetchRecentPaidOrders` (async pages) in app/shopify/orders.server.ts; recording Items remains |
 | `app/services/items/owned_item_resolver.rb` | app/services/items/owned-item-resolver.server.ts | todo |  |
 | `app/services/items/recorder.rb` | app/services/items/recorder.server.ts | todo |  |
 | `app/services/items/refund_processor.rb` | app/services/items/refund-processor.server.ts | todo |  |
@@ -327,39 +328,39 @@ the model layer.
 | `app/services/parts/consumer.rb` | app/services/parts/consumer.server.ts | todo |  |
 | `app/services/parts/csv_export.rb` | app/services/parts/csv-export.server.ts | todo |  |
 | `app/services/parts/csv_import.rb` | app/services/parts/csv-import.server.ts | todo | upload → storage.server.ts; long imports → background job |
-| `app/services/parts/item_properties.rb` | app/services/parts/item-properties.server.ts | todo |  |
+| `app/services/parts/item_properties.rb` | app/services/parts/item-properties.server.ts | wip | Shopify call done: `fetchVariantProperties` in app/shopify/product-facts.server.ts; saving to the Item remains |
 | `app/services/parts/matcher.rb` | app/services/parts/matcher.server.ts | todo |  |
 | `app/services/parts/planner.rb` | app/services/parts/planner.server.ts | todo |  |
 | `app/services/parts/reorder_list.rb` | app/services/parts/reorder-list.server.ts | todo |  |
 | `app/services/parts/service_sync.rb` | app/services/parts/service-sync.server.ts | todo |  |
 | `app/services/parts/ticket_costs.rb` | app/services/parts/ticket-costs.server.ts | todo |  |
-| `app/services/repairs/catalog_search.rb` | app/services/repairs/catalog-search.server.ts | todo |  |
+| `app/services/repairs/catalog_search.rb` | app/shopify/catalog-search.server.ts | done | `searchCatalog`; the caller passes repair-service + Care plan variant ids as `excludedVariantIds` |
 | `app/services/repairs/customer_redactor.rb` | app/services/repairs/customer-redactor.server.ts | todo |  |
 | `app/services/repairs/event_payload.rb` | app/services/repairs/event-payload.server.ts | done | takes plain ticket/quotation objects |
 | `app/services/repairs/intake_submission.rb` | app/services/repairs/intake-submission.server.ts | todo |  |
-| `app/services/repairs/order_lookup.rb` | app/services/repairs/order-lookup.server.ts | todo |  |
+| `app/services/repairs/order_lookup.rb` | app/services/repairs/order-lookup.server.ts | wip | Shopify lookup + ownership check done: `findOrderByNumber` in app/shopify/orders.server.ts (line images on `OrderLine.imageUrl`); recording Items and the guest token remain |
 | `app/services/repairs/payment_processor.rb` | app/services/repairs/payment-processor.server.ts | todo |  |
 | `app/services/repairs/product_cards.rb` | app/services/repairs/product-cards.server.ts | todo |  |
-| `app/services/repairs/product_catalog.rb` | app/services/repairs/product-catalog.server.ts | todo |  |
-| `app/services/repairs/purchase_history.rb` | app/services/repairs/purchase-history.server.ts | todo |  |
+| `app/services/repairs/product_catalog.rb` | app/shopify/repair-products.server.ts | done | `listRepairVariants` (cached), `fetchRepairVariants` (paged, errors propagate: for ServiceSync), `fetchRepairVariant`; settings passed in |
+| `app/services/repairs/purchase_history.rb` | app/shopify/orders.server.ts | done | `fetchPurchaseHistory` |
 | `app/services/repairs/quote_canceller.rb` | app/services/repairs/quote-canceller.server.ts | todo |  |
 | `app/services/repairs/quote_decision.rb` | app/services/repairs/quote-decision.server.ts | todo |  |
 | `app/services/repairs/quote_draft_order.rb` | app/services/repairs/quote-draft-order.server.ts | todo |  |
 | `app/services/repairs/quote_notifications.rb` | app/services/repairs/quote-notifications.server.ts | todo | call `emitNotification("quote_paid"\|"quote_declined"\|"quote_expired", …)`; field mapping already in notifications/events.server.ts |
 | `app/services/repairs/quote_sender.rb` | app/services/repairs/quote-sender.server.ts | todo |  |
 | `app/services/repairs/webhook_delivery.rb` | app/services/repairs/webhook-delivery.server.ts | done | SSRF guard: strict outside development/test, every resolved address public (wider ranges than Rails), connection pinned, no redirects |
-| `app/services/shopify/admin_api.rb` | app/services/shopify/admin-api.server.ts | todo | → thin wrapper over `admin.graphql` / `unauthenticated.admin(shop)`; tests use test/support/fake-graphql.ts |
-| `app/services/shopify/customer_signing_key.rb` | app/services/shopify/customer-signing-key.server.ts | todo | uses encryption.server.ts |
+| `app/services/shopify/admin_api.rb` | app/shopify/graphql.server.ts, client.server.ts, draft-orders.server.ts, customers.server.ts, shop.server.ts | done | `adminGraphql` (typed data, THROTTLED/429 retry with backoff, `ShopifyGraphqlError`/`ShopifyUserError`), `adminClientForShop` (offline session). REST draft orders → `draftOrderCreate/Update/InvoiceSend/Complete/Delete`; REST customer metafields → `customer.metafield` + `metafieldsSet`; `shop_name` → `fetchShopInfo` |
+| `app/services/shopify/customer_signing_key.rb` | app/shopify/customer-signing-key.server.ts | done | storage via a `save` callback (caller encrypts with encryption.server.ts, context "Shop.customer_signing_key") |
 | `app/services/shopify/customer_token.rb` | app/services/shopify/customer-token.server.ts | done | takes the key instead of the shop; the key lookup is injected (`AppProxyDeps.customerSigningKey`) |
-| `app/services/shopify/discount_codes.rb` | app/services/shopify/discount-codes.server.ts | todo |  |
+| `app/services/shopify/discount_codes.rb` | app/shopify/discount-codes.server.ts | done |  |
 | `app/services/shopify/gid.rb` | app/services/shopify/gid.server.ts | done | `numericId` / `buildGid`; no Rails test |
-| `app/services/trade_ins/credit_issuer.rb` | app/services/trade_ins/credit-issuer.server.ts | todo |  |
+| `app/services/trade_ins/credit_issuer.rb` | app/services/trade_ins/credit-issuer.server.ts | wip | Shopify calls done: `creditStoreCredit` (app/shopify/store-credit.server.ts), `createDiscountCode`; choosing the method remains |
 | `app/services/trade_ins/order_linker.rb` | app/services/trade_ins/order-linker.server.ts | todo |  |
 | `app/services/trade_ins/quoter.rb` | app/services/trade_ins/quoter.server.ts | todo |  |
 | `app/services/trade_ins/submission.rb` | app/services/trade_ins/submission.server.ts | todo |  |
 | `app/services/trade_ins/workflow.rb` | app/services/trade_ins/workflow.server.ts | todo |  |
 | `app/services/warranty/cover_assigner.rb` | app/services/warranty/cover-assigner.server.ts | todo |  |
-| `app/services/warranty/product_facts.rb` | app/services/warranty/product-facts.server.ts | wip | the `Facts` struct is ported as `ProductFacts` (app/models/product-facts.ts); the Shopify fetch is still todo |
+| `app/services/warranty/product_facts.rb` | app/shopify/product-facts.server.ts | done | `ProductFacts` (per-instance memo + `ShopifyCache`, in-memory by default) |
 
 ### Controllers: proxy (storefront) (9)
 
@@ -513,29 +514,29 @@ the model layer.
 | `test/services/care/activator_test.rb` | test/integration/services/care/activator.test.ts | todo |  |
 | `test/services/care/notices_and_economics_test.rb` | test/integration/services/care/notices-and-economics.test.ts | todo |  |
 | `test/services/care/refund_handler_test.rb` | test/integration/services/care/refund-handler.test.ts | todo |  |
-| `test/services/items/order_data_test.rb` | test/integration/services/items/order-data.test.ts | todo |  |
-| `test/services/items/order_importer_test.rb` | test/integration/services/items/order-importer.test.ts | todo |  |
+| `test/services/items/order_data_test.rb` | test/unit/shopify/orders.test.ts | done |  |
+| `test/services/items/order_importer_test.rb` | test/integration/services/items/order-importer.test.ts | wip | Shopify half in test/unit/shopify/orders.test.ts; Item recording assertions remain |
 | `test/services/items/recorder_test.rb` | test/integration/services/items/recorder.test.ts | todo |  |
 | `test/services/items/refund_processor_test.rb` | test/integration/services/items/refund-processor.test.ts | todo |  |
 | `test/services/items/registration_submission_test.rb` | test/integration/services/items/registration-submission.test.ts | todo |  |
 | `test/services/notifications/notifications_test.rb` | test/unit/notifications/{notifications,integrations,templates}.test.ts | done | pure (in-memory store); adds consent, toggles, idempotency, retries, escaping, snapshots, Flow TOML parity. Encryption-at-rest of the Klaviyo key goes with the Shop model |
 | `test/services/parts/csv_import_test.rb` | test/integration/services/parts/csv-import.test.ts | todo |  |
-| `test/services/parts/item_properties_test.rb` | test/integration/services/parts/item-properties.test.ts | todo |  |
+| `test/services/parts/item_properties_test.rb` | test/integration/services/parts/item-properties.test.ts | wip | Shopify half in test/unit/shopify/products.test.ts; fetch-once + settings rename remain |
 | `test/services/parts/planning_test.rb` | test/integration/services/parts/planning.test.ts | todo |  |
 | `test/services/parts/reorder_and_sync_test.rb` | test/integration/services/parts/reorder-and-sync.test.ts | todo |  |
 | `test/services/repairs/customer_redactor_test.rb` | test/integration/services/repairs/customer-redactor.test.ts | todo |  |
 | `test/services/repairs/event_payload_test.rb` | test/unit/repairs/outbound-webhook.test.ts | done |  |
 | `test/services/repairs/intake_submission_test.rb` | test/integration/services/repairs/intake-submission.test.ts | todo |  |
-| `test/services/repairs/order_lookup_and_catalog_test.rb` | test/integration/services/repairs/order-lookup-and-catalog.test.ts | todo |  |
+| `test/services/repairs/order_lookup_and_catalog_test.rb` | test/integration/services/repairs/order-lookup-and-catalog.test.ts | wip | catalogue + lookup scenarios in test/unit/shopify/{products,orders}.test.ts; Item recording + order token remain |
 | `test/services/repairs/payment_processor_test.rb` | test/integration/services/repairs/payment-processor.test.ts | todo |  |
-| `test/services/repairs/product_catalog_test.rb` | test/integration/services/repairs/product-catalog.test.ts | todo |  |
-| `test/services/repairs/purchase_history_test.rb` | test/integration/services/repairs/purchase-history.test.ts | todo |  |
+| `test/services/repairs/product_catalog_test.rb` | test/unit/shopify/products.test.ts | done |  |
+| `test/services/repairs/purchase_history_test.rb` | test/unit/shopify/orders.test.ts | done |  |
 | `test/services/repairs/quote_canceller_test.rb` | test/integration/services/repairs/quote-canceller.test.ts | todo |  |
 | `test/services/repairs/quote_decision_test.rb` | test/integration/services/repairs/quote-decision.test.ts | todo |  |
 | `test/services/repairs/quote_sender_test.rb` | test/integration/services/repairs/quote-sender.test.ts | todo |  |
 | `test/services/repairs/webhook_delivery_test.rb` | test/unit/repairs/webhook-delivery.test.ts | done |  |
-| `test/services/shopify/admin_api_test.rb` | test/integration/services/shopify/admin-api.test.ts | todo |  |
-| `test/services/shopify/customer_signing_key_test.rb` | test/integration/services/shopify/customer-signing-key.test.ts | todo |  |
+| `test/services/shopify/admin_api_test.rb` | test/unit/shopify/draft-orders.test.ts, graphql.test.ts | done | REST assertions → GraphQL operations/variables; adds throttling + userErrors |
+| `test/services/shopify/customer_signing_key_test.rb` | test/unit/shopify/customer-signing-key.test.ts | done |  |
 | `test/services/shopify/customer_token_test.rb` | test/unit/customer-token.test.ts | done | "encrypted at rest" case moves to the Shop model port; proxy_orders token cases are in test/unit/app-proxy.test.ts |
 | `test/services/trade_ins/trade_ins_test.rb` | test/integration/services/trade_ins/trade-ins.test.ts | todo |  |
 | `test/services/warranty/cover_assigner_test.rb` | test/integration/services/warranty/cover-assigner.test.ts | todo |  |

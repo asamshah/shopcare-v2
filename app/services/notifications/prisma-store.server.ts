@@ -8,7 +8,7 @@
  * retried request), it returns that row with `created: false`.
  */
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { Db } from "../../lib/db-lock.server";
+import { isUniqueViolation, type Db } from "../../lib/db-lock.server";
 import { createNotificationDelivery } from "../../models/notification-delivery.server";
 import type { Channel, EventName } from "./events.server";
 import type {
@@ -77,11 +77,7 @@ export class PrismaNotificationStore implements NotificationStore {
       });
       return { delivery: toDelivery(row), created: true };
     } catch (error) {
-      if (
-        !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-        error.code !== "P2002"
-      )
-        throw error;
+      if (!isUniqueViolation(error)) throw error;
       const existing = await this.db.notificationDelivery.findFirstOrThrow({
         where: {
           shopId: shop.id,

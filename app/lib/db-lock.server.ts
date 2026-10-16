@@ -62,3 +62,11 @@ export function inTransaction<T>(
   if (isTransactionClient(db)) return fn(db);
   return (db as PrismaClient).$transaction(fn);
 }
+
+/** True for a unique-constraint violation (Rails ActiveRecord::RecordNotUnique). */
+export function isUniqueViolation(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  );
+}

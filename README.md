@@ -27,6 +27,7 @@ sends its own emails, and Flow and Klaviyo become optional integrations.
 ```
 app/
   routes/            React Router routes: app.* (admin), proxy.* (App Proxy), webhooks.*, files.$
+  shopify/           Admin API (GraphQL) calls: draft orders, discounts, store credit, orders, products, shop
   lib/               infrastructure: encryption, storage, background dispatch, webhooks, http caching
   services/          domain services (email.server.ts so far; Rails services are ported here)
   jobs/              background job handlers + registry

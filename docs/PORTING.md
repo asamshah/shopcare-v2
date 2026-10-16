@@ -119,6 +119,35 @@ export const action = proxyRoute({ throttle: { ... } }, async (ctx) => {
   Integration tests use `appProxyRequest()` from
   `test/support/shopify-requests.ts`.
 
+## Admin screens (wave 2, w2-admin)
+
+- **Routes**: `app/routes/app.<area>*.tsx`; logic in `app/services/admin/*`. Every
+  loader/action starts with `requireAdmin(request)` (`authenticate.admin` → the
+  Shop row) and reads records with `where: { id, shopId }`, so another shop's id
+  is a 404. Workshop inventory and trade-in screens redirect to `/app/tickets`
+  when their flag is off (Rails `require_parts` / `require_trade_in`).
+- **Actions**: one action per page, chosen by a hidden `intent` field; input is
+  checked with zod (`app/services/admin/form.server.ts`: malformed ids → 404,
+  malformed values → 400) before model validation gives the merchant-facing
+  messages. Forms keep Rails' hidden "0" + checkbox pattern (last value wins).
+  An invalid save returns `data({ errors, values }, 422)` and the form
+  re-renders with them.
+- **Flash**: redirects carry `?notice=` / `?alert=`; `app/components/flash-toast.tsx`
+  shows an App Bridge toast and strips them (no cookies inside the admin iframe).
+- **Polaris web components** under React 18: kebab-case attributes, booleans
+  via `checkedIf`/`selectedIf` spreads (app/components/attrs.ts), uncontrolled
+  fields read from FormData; CSV downloads are fetched (App Bridge adds the
+  session token) and saved as a blob.
+- **Contract stubs** (`// STUB(w2-admin)`, replaced at integration):
+  app/services/quotes/{send,resend,revise,decision,result}.server.ts,
+  app/services/repairs/ticket-status.server.ts,
+  app/services/trade_ins/workflow.server.ts; app/services/care/plan-economics.server.ts
+  is a full port marked STUB. Items → "Import recent orders" enqueues
+  `import-orders` (w2-backend job; `itemsDeps.enqueueImport`).
+- **Tests**: `test/support/admin.ts` (`signInAs(shop, { admin })`, `get`, `post`,
+  `flash`, `statusOf`, `dataOf`) runs loaders/actions against Postgres; the
+  Shopify client is a `FakeGraphql`, contract services are `vi.mock`ed.
+
 ## Notifications (v2 design)
 
 **Decision:** ShopCare sends its own customer and staff emails from code.
@@ -354,7 +383,7 @@ the model layer.
 | `app/services/care/activator.rb` | app/services/care/activator.server.ts | done | `CareActivator`; units locked with `SELECT … FOR UPDATE` on the order's items; unique (shop, line, unit) makes races safe |
 | `app/services/care/credit_issuer.rb` | app/services/care/credit-issuer.server.ts | todo |  |
 | `app/services/care/notices.rb` | app/services/care/notices.server.ts | todo |  |
-| `app/services/care/plan_economics.rb` | app/services/care/plan-economics.server.ts | todo |  |
+| `app/services/care/plan_economics.rb` | app/services/care/plan-economics.server.ts | done | STUB(w2-admin) marker: full port, w2-backend owns app/services/care/* |
 | `app/services/care/plan_refunder.rb` | app/services/care/plan-refunder.server.ts | done | `refundCarePlan(client, cover)` → `refundLineItem` (app/shopify/refunds.server.ts); v2 fix: refunds in the presentment currency (`presentmentMoney` + `RefundInput.currency`) when the order currency differs from the shop's |
 | `app/services/care/plan_terms.rb` | app/services/care/plan-terms.server.ts | done | pure function; tests are in care-plan.test.ts (Rails tested it via care_plan_test) |
 | `app/services/care/refund_handler.rb` | app/services/care/refund-handler.server.ts | todo |  |
@@ -369,13 +398,13 @@ the model layer.
 | `app/services/notifications/flow_client.rb` | app/shopify/flow.server.ts (`triggerFlow`, `flowPayload`) + app/services/notifications/flow-client.server.ts (`FlowClient`: one attempt, errors → `DeliveryError`) | done | optional integration, unchanged trigger set; **off by default**. `customer_id` is the only place an id becomes a JSON number (Flow requires it); ids past 2^53 are sent as digits |
 | `app/services/notifications/klaviyo_client.rb` | app/services/notifications/klaviyo-client.server.ts | done | optional integration, unchanged event set; only 429/5xx/network retried |
 | `app/services/parts/consumer.rb` | app/services/parts/consumer.server.ts | todo |  |
-| `app/services/parts/csv_export.rb` | app/services/parts/csv-export.server.ts | todo |  |
-| `app/services/parts/csv_import.rb` | app/services/parts/csv-import.server.ts | todo | upload → storage.server.ts; long imports → background job |
+| `app/services/parts/csv_export.rb` | app/services/parts/csv-export.server.ts | done | `exportParts`, `exportStockUsed`; CSV via app/lib/csv.ts |
+| `app/services/parts/csv_import.rb` | app/services/parts/csv-import.server.ts | done | `CsvImport.build(...)` → `errors`/`summary()`/`apply()`; CSV stored in part_imports.csv_data (no background job: 2 MB / 5000 rows applies in one transaction) |
 | `app/services/parts/item_properties.rb` | app/services/parts/item-properties.server.ts | done | `itemProperties(shop, client, item)`: fetched once (`fetched_at`), saved on the Item; Shopify read is `fetchVariantProperties` |
-| `app/services/parts/matcher.rb` | app/services/parts/matcher.server.ts | todo |  |
-| `app/services/parts/planner.rb` | app/services/parts/planner.server.ts | todo |  |
-| `app/services/parts/reorder_list.rb` | app/services/parts/reorder-list.server.ts | todo |  |
-| `app/services/parts/service_sync.rb` | app/services/parts/service-sync.server.ts | todo |  |
+| `app/services/parts/matcher.rb` | app/services/parts/matcher.server.ts | done | `matchComponent` |
+| `app/services/parts/planner.rb` | app/services/parts/planner.server.ts | done | `planTicketParts`; also needed by the Consumer (w2-backend) |
+| `app/services/parts/reorder_list.rb` | app/services/parts/reorder-list.server.ts | done |  |
+| `app/services/parts/service_sync.rb` | app/services/repairs/service-import.server.ts | done | `importRepairServices(shopId, catalog)` |
 | `app/services/parts/ticket_costs.rb` | app/services/parts/ticket-costs.server.ts | todo |  |
 | `app/services/repairs/catalog_search.rb` | app/shopify/catalog-search.server.ts | done | `searchCatalog`; the caller passes repair-service + Care plan variant ids as `excludedVariantIds` |
 | `app/services/repairs/customer_redactor.rb` | app/services/repairs/customer-redactor.server.ts | todo |  |
@@ -423,28 +452,28 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/controllers/admin_controller.rb` | app/routes/app.tsx / app/shopify.server.ts | todo | → app/routes/app.tsx layout (nav) |
-| `app/controllers/application_controller.rb` | app/routes/app.tsx / app/shopify.server.ts | todo | → app/root.tsx / shopify.server.ts |
-| `app/controllers/authenticated_controller.rb` | app/routes/app.tsx / app/shopify.server.ts | todo | → `authenticate.admin` in app/routes/app.tsx loader |
-| `app/controllers/care_plans_controller.rb` | app/routes/app.care_plans*.tsx | todo |  |
+| `app/controllers/admin_controller.rb` | app/routes/app.tsx + app/services/admin/context.server.ts | done | `requireAdmin` (authenticate.admin → Shop row), `requireParts`/`requireTradeIn`, shop-scoped `orNotFound`; layout nav in app.tsx |
+| `app/controllers/application_controller.rb` | app/root.tsx / app/shopify.server.ts | done | template |
+| `app/controllers/authenticated_controller.rb` | app/services/admin/context.server.ts | done | `requireAdmin` in every admin loader/action; tests swap it with `configureAdminAuth` (test/support/admin.ts) |
+| `app/controllers/care_plans_controller.rb` | app/routes/app.care_plans._index/new/$id._index/$id.edit.tsx + app/services/admin/care-plans.server.ts | done | delete is an intent on the edit route |
 | `app/controllers/concerns/proxy_throttling.rb` | app/lib/proxy-throttling.server.ts | wip | decided: Postgres upsert counter (`postgresThrottleStore`); table pending in `prisma/pending/proxy_throttles.sql` until added to the schema; prune old rows daily |
-| `app/controllers/items_controller.rb` | app/routes/app.items*.tsx | todo |  |
-| `app/controllers/part_imports_controller.rb` | app/routes/app.part_imports*.tsx | todo |  |
-| `app/controllers/part_variants_controller.rb` | app/routes/app.part_variants*.tsx | todo |  |
-| `app/controllers/parts_controller.rb` | app/routes/app.parts*.tsx | todo |  |
-| `app/controllers/product_groups_controller.rb` | app/routes/app.product_groups*.tsx | todo |  |
-| `app/controllers/quotation_line_items_controller.rb` | app/routes/app.quotation_line_items*.tsx | todo |  |
-| `app/controllers/quotations_controller.rb` | app/routes/app.quotations*.tsx | todo |  |
-| `app/controllers/registrations_controller.rb` | app/routes/app.registrations*.tsx | todo |  |
-| `app/controllers/repair_services_controller.rb` | app/routes/app.repair_services*.tsx | todo |  |
-| `app/controllers/service_components_controller.rb` | app/routes/app.service_components*.tsx | todo |  |
-| `app/controllers/settings_controller.rb` | app/routes/app.settings*.tsx | todo |  |
-| `app/controllers/setup_controller.rb` | app/routes/app.setup*.tsx | todo |  |
-| `app/controllers/ticket_parts_controller.rb` | app/routes/app.ticket_parts*.tsx | todo |  |
-| `app/controllers/tickets_controller.rb` | app/routes/app.tickets*.tsx | todo |  |
-| `app/controllers/trade_in_programs_controller.rb` | app/routes/app.trade_in_programs*.tsx | todo |  |
-| `app/controllers/trade_ins_controller.rb` | app/routes/app.trade_ins*.tsx | todo |  |
-| `app/controllers/warranty_policies_controller.rb` | app/routes/app.warranty_policies*.tsx | todo |  |
+| `app/controllers/items_controller.rb` | app/routes/app.items._index.tsx, app.items.$id.tsx + app/services/admin/items.server.ts | done | import enqueues `import-orders` (job owned by w2-backend; enqueuer injectable) |
+| `app/controllers/part_imports_controller.rb` | app/routes/app.parts.imports.new/$id/template.tsx | done | apply claims the import (appliedAt) first, so a double-click can't apply twice |
+| `app/controllers/part_variants_controller.rb` | app/routes/app.parts.$id._index.tsx (intents) | done |  |
+| `app/controllers/parts_controller.rb` | app/routes/app.parts._index/new/$id._index/$id.edit/reorder/export/stock_used.tsx + app/services/admin/parts.server.ts | done | CSV downloads fetched with the session token (app/components/download-button.tsx) |
+| `app/controllers/product_groups_controller.rb` | app/routes/app.product_groups._index/new/$id.tsx + app/services/admin/product-groups.server.ts | done |  |
+| `app/controllers/quotation_line_items_controller.rb` | app/routes/app.tickets.$id.tsx (intents add_line/remove_line) + app/services/admin/tickets.server.ts | done |  |
+| `app/controllers/quotations_controller.rb` | app/routes/app.tickets.$id.tsx (intents send/resend/revise/decline/cover) + app/services/admin/tickets.server.ts | done | send/resend/revise/decline call the w2-backend contract (app/services/quotes/*); v2 adds "Decline on their behalf" |
+| `app/controllers/registrations_controller.rb` | app/routes/app.items.$id.tsx (intents verify/reject) | done | reviewed from the item page, by the item's registration |
+| `app/controllers/repair_services_controller.rb` | app/routes/app.repair_services._index.tsx, app.repair_services.$id.tsx | done |  |
+| `app/controllers/service_components_controller.rb` | app/routes/app.repair_services.$id.tsx (intents add_component/remove_component) | done |  |
+| `app/controllers/settings_controller.rb` | app/routes/app.settings.tsx + app/services/admin/settings.server.ts | done | v2: per-email toggles/subject/intro, staff + reply-to addresses; webhook secret is the encrypted column |
+| `app/controllers/setup_controller.rb` | app/routes/app.setup.tsx + app/services/admin/setup.server.ts | done |  |
+| `app/controllers/ticket_parts_controller.rb` | app/routes/app.tickets.$id.tsx (intents plan_parts/add_part/update_part/remove_part) | done |  |
+| `app/controllers/tickets_controller.rb` | app/routes/app.tickets._index.tsx, app.tickets.$id.tsx + app/services/admin/tickets.server.ts | done | status changes call `changeTicketStatus` (w2-backend contract) |
+| `app/controllers/trade_in_programs_controller.rb` | app/routes/app.trade_in_programs._index/new/$id.tsx + app/services/admin/trade-in-programs.server.ts | done |  |
+| `app/controllers/trade_ins_controller.rb` | app/routes/app.trade_ins._index.tsx, app.trade_ins.$id.tsx | done | steps call app/services/trade_ins/workflow.server.ts (STUB until w2-backend) |
+| `app/controllers/warranty_policies_controller.rb` | app/routes/app.warranty_policies._index/new/$id.tsx + app/services/admin/warranty.server.ts | done |  |
 
 ### Jobs (13)
 
@@ -468,58 +497,58 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/views/care_plans/_form.html.erb` | app/routes/app.care_plans* (component) | todo |  |
-| `app/views/care_plans/edit.html.erb` | app/routes/app.care_plans* (component) | todo |  |
-| `app/views/care_plans/index.html.erb` | app/routes/app.care_plans* (component) | todo |  |
-| `app/views/care_plans/new.html.erb` | app/routes/app.care_plans* (component) | todo |  |
-| `app/views/care_plans/show.html.erb` | app/routes/app.care_plans* (component) | todo |  |
-| `app/views/items/index.html.erb` | app/routes/app.items* (component) | todo |  |
-| `app/views/items/show.html.erb` | app/routes/app.items* (component) | todo |  |
-| `app/views/layouts/_flash_messages.html.erb` | app/root.tsx / app/routes/app.tsx | todo | → Polaris toast via App Bridge (`shopify.toast.show`) |
-| `app/views/layouts/application.html.erb` | app/root.tsx / app/routes/app.tsx | todo | → app/root.tsx |
-| `app/views/layouts/embedded_app.html.erb` | app/root.tsx / app/routes/app.tsx | todo | → app/routes/app.tsx (AppProvider + s-app-nav) |
-| `app/views/part_imports/new.html.erb` | app/routes/app.part_imports* (component) | todo |  |
-| `app/views/part_imports/show.html.erb` | app/routes/app.part_imports* (component) | todo |  |
-| `app/views/parts/_form.html.erb` | app/routes/app.parts* (component) | todo |  |
-| `app/views/parts/edit.html.erb` | app/routes/app.parts* (component) | todo |  |
-| `app/views/parts/index.html.erb` | app/routes/app.parts* (component) | todo |  |
-| `app/views/parts/new.html.erb` | app/routes/app.parts* (component) | todo |  |
-| `app/views/parts/reorder.html.erb` | app/routes/app.parts* (component) | todo |  |
-| `app/views/parts/show.html.erb` | app/routes/app.parts* (component) | todo |  |
-| `app/views/product_groups/_form.html.erb` | app/routes/app.product_groups* (component) | todo |  |
-| `app/views/product_groups/_select.html.erb` | app/routes/app.product_groups* (component) | todo |  |
-| `app/views/product_groups/edit.html.erb` | app/routes/app.product_groups* (component) | todo |  |
-| `app/views/product_groups/index.html.erb` | app/routes/app.product_groups* (component) | todo |  |
-| `app/views/product_groups/new.html.erb` | app/routes/app.product_groups* (component) | todo |  |
+| `app/views/care_plans/_form.html.erb` | app/routes/app.care_plans* (component) | done |  |
+| `app/views/care_plans/edit.html.erb` | app/routes/app.care_plans* (component) | done |  |
+| `app/views/care_plans/index.html.erb` | app/routes/app.care_plans* (component) | done |  |
+| `app/views/care_plans/new.html.erb` | app/routes/app.care_plans* (component) | done |  |
+| `app/views/care_plans/show.html.erb` | app/routes/app.care_plans* (component) | done |  |
+| `app/views/items/index.html.erb` | app/routes/app.items* (component) | done |  |
+| `app/views/items/show.html.erb` | app/routes/app.items* (component) | done |  |
+| `app/views/layouts/_flash_messages.html.erb` | app/root.tsx / app/routes/app.tsx | done | → Polaris toast via App Bridge (`shopify.toast.show`) |
+| `app/views/layouts/application.html.erb` | app/root.tsx / app/routes/app.tsx | done | → app/root.tsx |
+| `app/views/layouts/embedded_app.html.erb` | app/root.tsx / app/routes/app.tsx | done | → app/routes/app.tsx (AppProvider + s-app-nav) |
+| `app/views/part_imports/new.html.erb` | app/routes/app.part_imports* (component) | done |  |
+| `app/views/part_imports/show.html.erb` | app/routes/app.part_imports* (component) | done |  |
+| `app/views/parts/_form.html.erb` | app/routes/app.parts* (component) | done |  |
+| `app/views/parts/edit.html.erb` | app/routes/app.parts* (component) | done |  |
+| `app/views/parts/index.html.erb` | app/routes/app.parts* (component) | done |  |
+| `app/views/parts/new.html.erb` | app/routes/app.parts* (component) | done |  |
+| `app/views/parts/reorder.html.erb` | app/routes/app.parts* (component) | done |  |
+| `app/views/parts/show.html.erb` | app/routes/app.parts* (component) | done |  |
+| `app/views/product_groups/_form.html.erb` | app/routes/app.product_groups* (component) | done |  |
+| `app/views/product_groups/_select.html.erb` | app/routes/app.product_groups* (component) | done |  |
+| `app/views/product_groups/edit.html.erb` | app/routes/app.product_groups* (component) | done |  |
+| `app/views/product_groups/index.html.erb` | app/routes/app.product_groups* (component) | done |  |
+| `app/views/product_groups/new.html.erb` | app/routes/app.product_groups* (component) | done |  |
 | `app/views/proxy/quotes/show.html.erb` | app/routes/proxy.quotes.$token.tsx | todo | storefront quote review page via App Proxy |
-| `app/views/repair_services/_service.html.erb` | app/routes/app.repair_services* (component) | todo |  |
-| `app/views/repair_services/edit.html.erb` | app/routes/app.repair_services* (component) | todo |  |
-| `app/views/repair_services/index.html.erb` | app/routes/app.repair_services* (component) | todo |  |
-| `app/views/settings/show.html.erb` | app/routes/app.settings* (component) | todo |  |
-| `app/views/setup/_wizard.html.erb` | app/routes/app.setup* (component) | todo |  |
-| `app/views/tickets/_quote_decision.html.erb` | app/routes/app.tickets* (component) | todo |  |
-| `app/views/tickets/index.html.erb` | app/routes/app.tickets* (component) | todo |  |
-| `app/views/tickets/show.html.erb` | app/routes/app.tickets* (component) | todo |  |
-| `app/views/trade_in_programs/_form.html.erb` | app/routes/app.trade_in_programs* (component) | todo |  |
-| `app/views/trade_in_programs/edit.html.erb` | app/routes/app.trade_in_programs* (component) | todo |  |
-| `app/views/trade_in_programs/index.html.erb` | app/routes/app.trade_in_programs* (component) | todo |  |
-| `app/views/trade_in_programs/new.html.erb` | app/routes/app.trade_in_programs* (component) | todo |  |
-| `app/views/trade_ins/index.html.erb` | app/routes/app.trade_ins* (component) | todo |  |
-| `app/views/trade_ins/show.html.erb` | app/routes/app.trade_ins* (component) | todo |  |
-| `app/views/warranty_policies/_form.html.erb` | app/routes/app.warranty_policies* (component) | todo |  |
-| `app/views/warranty_policies/edit.html.erb` | app/routes/app.warranty_policies* (component) | todo |  |
-| `app/views/warranty_policies/index.html.erb` | app/routes/app.warranty_policies* (component) | todo |  |
-| `app/views/warranty_policies/new.html.erb` | app/routes/app.warranty_policies* (component) | todo |  |
+| `app/views/repair_services/_service.html.erb` | app/routes/app.repair_services* (component) | done |  |
+| `app/views/repair_services/edit.html.erb` | app/routes/app.repair_services* (component) | done |  |
+| `app/views/repair_services/index.html.erb` | app/routes/app.repair_services* (component) | done |  |
+| `app/views/settings/show.html.erb` | app/routes/app.settings* (component) | done |  |
+| `app/views/setup/_wizard.html.erb` | app/routes/app.setup* (component) | done |  |
+| `app/views/tickets/_quote_decision.html.erb` | app/routes/app.tickets* (component) | done |  |
+| `app/views/tickets/index.html.erb` | app/routes/app.tickets* (component) | done |  |
+| `app/views/tickets/show.html.erb` | app/routes/app.tickets* (component) | done |  |
+| `app/views/trade_in_programs/_form.html.erb` | app/routes/app.trade_in_programs* (component) | done |  |
+| `app/views/trade_in_programs/edit.html.erb` | app/routes/app.trade_in_programs* (component) | done |  |
+| `app/views/trade_in_programs/index.html.erb` | app/routes/app.trade_in_programs* (component) | done |  |
+| `app/views/trade_in_programs/new.html.erb` | app/routes/app.trade_in_programs* (component) | done |  |
+| `app/views/trade_ins/index.html.erb` | app/routes/app.trade_ins* (component) | done |  |
+| `app/views/trade_ins/show.html.erb` | app/routes/app.trade_ins* (component) | done |  |
+| `app/views/warranty_policies/_form.html.erb` | app/routes/app.warranty_policies* (component) | done |  |
+| `app/views/warranty_policies/edit.html.erb` | app/routes/app.warranty_policies* (component) | done |  |
+| `app/views/warranty_policies/index.html.erb` | app/routes/app.warranty_policies* (component) | done |  |
+| `app/views/warranty_policies/new.html.erb` | app/routes/app.warranty_policies* (component) | done |  |
 
 ### Helpers (5)
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/helpers/items_helper.rb` | app/lib/items-format.ts | todo |  |
+| `app/helpers/items_helper.rb` | app/lib/format.ts | done | |
 | `app/helpers/liquid_helper.rb` | app/lib/http.server.ts (`liquidText`, `liquidResponse`) | done | |
-| `app/helpers/parts_helper.rb` | app/lib/parts-format.ts | todo |  |
-| `app/helpers/tickets_helper.rb` | app/lib/tickets-format.ts | todo |  |
-| `app/helpers/trade_ins_helper.rb` | app/lib/trade-ins-format.ts | todo |  |
+| `app/helpers/parts_helper.rb` | app/lib/format.ts, app/lib/format.server.ts | done | |
+| `app/helpers/tickets_helper.rb` | app/lib/format.ts, app/lib/format.server.ts (`formatMoney`) | done | |
+| `app/helpers/trade_ins_helper.rb` | app/lib/format.ts | done | |
 
 ### Assets (1)
 
@@ -531,7 +560,7 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/javascript/application.js` | (none) | todo | → not needed (React) |
+| `app/javascript/application.js` | (none) | done | not needed (React); Enter-to-submit in app/components/submit-on-enter.tsx |
 
 ### Tests: models (12)
 
@@ -563,10 +592,10 @@ the model layer.
 | `test/services/items/refund_processor_test.rb` | test/integration/services/items/refund-processor.test.ts | todo |  |
 | `test/services/items/registration_submission_test.rb` | test/integration/services/items/registration-submission.test.ts | todo |  |
 | `test/services/notifications/notifications_test.rb` | test/unit/notifications/{notifications,integrations,templates}.test.ts + test/integration/wiring/notification-store.test.ts | done | unit: in-memory store; integration: Prisma store (claim/conflict/race), Shop-row settings, emit → deliver round trip |
-| `test/services/parts/csv_import_test.rb` | test/integration/services/parts/csv-import.test.ts | todo |  |
+| `test/services/parts/csv_import_test.rb` | test/integration/services/parts/csv-import.test.ts | done |  |
 | `test/services/parts/item_properties_test.rb` | test/integration/services/parts/item-properties.test.ts | done | Shopify half also in test/unit/shopify/products.test.ts |
-| `test/services/parts/planning_test.rb` | test/integration/services/parts/planning.test.ts | todo |  |
-| `test/services/parts/reorder_and_sync_test.rb` | test/integration/services/parts/reorder-and-sync.test.ts | todo |  |
+| `test/services/parts/planning_test.rb` | test/integration/services/parts/planning.test.ts | wip | Matcher + Planner done; Consumer/TicketCosts half with w2-backend |
+| `test/services/parts/reorder_and_sync_test.rb` | test/integration/services/parts/reorder-and-sync.test.ts | done |  |
 | `test/services/repairs/customer_redactor_test.rb` | test/integration/services/repairs/customer-redactor.test.ts | todo |  |
 | `test/services/repairs/event_payload_test.rb` | test/unit/repairs/outbound-webhook.test.ts | done |  |
 | `test/services/repairs/intake_submission_test.rb` | test/integration/services/repairs/intake-submission.test.ts | todo |  |
@@ -596,21 +625,21 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `test/integration/admin_items_test.rb` | test/integration/routes/admin-items.test.ts | todo |  |
-| `test/integration/admin_part_imports_test.rb` | test/integration/routes/admin-part-imports.test.ts | todo |  |
-| `test/integration/admin_parts_test.rb` | test/integration/routes/admin-parts.test.ts | todo |  |
-| `test/integration/admin_quotes_test.rb` | test/integration/routes/admin-quotes.test.ts | todo |  |
-| `test/integration/admin_repair_services_test.rb` | test/integration/routes/admin-repair-services.test.ts | todo |  |
-| `test/integration/admin_smoke_test.rb` | test/integration/routes/admin-smoke.test.ts | todo |  |
-| `test/integration/care_plans_test.rb` | test/integration/routes/care-plans.test.ts | todo |  |
-| `test/integration/product_groups_test.rb` | test/integration/routes/product-groups.test.ts | todo |  |
+| `test/integration/admin_items_test.rb` | test/integration/routes/admin-catalog.test.ts (items) + admin-tickets.test.ts (linking) | done |  |
+| `test/integration/admin_part_imports_test.rb` | test/integration/routes/admin-parts.test.ts (part imports) | done |  |
+| `test/integration/admin_parts_test.rb` | test/integration/routes/admin-parts.test.ts + admin-settings.test.ts | done | completion is mocked changeTicketStatus (Consumer is w2-backend) |
+| `test/integration/admin_quotes_test.rb` | test/integration/routes/admin-tickets.test.ts (quote actions) | done | quote services mocked; their behaviour is tested by w2-backend |
+| `test/integration/admin_repair_services_test.rb` | test/integration/routes/admin-setup-services.test.ts | done |  |
+| `test/integration/admin_smoke_test.rb` | test/integration/routes/admin-tickets.test.ts + admin-settings.test.ts | done | iframe/bounce/idToken tests replaced by the authenticate.admin seam (signed-out test); loaders are asserted on data, not HTML |
+| `test/integration/care_plans_test.rb` | test/integration/routes/admin-catalog.test.ts + admin-settings.test.ts | wip | admin half done; storefront half (proxy care_plans/care_offers) is w2-proxy |
+| `test/integration/product_groups_test.rb` | test/integration/routes/admin-catalog.test.ts | done |  |
 | `test/integration/proxy_find_product_test.rb` | test/integration/routes/proxy-find-product.test.ts | todo |  |
 | `test/integration/proxy_intake_test.rb` | test/integration/routes/proxy-intake.test.ts | todo |  |
 | `test/integration/proxy_orders_test.rb` | test/integration/routes/proxy-orders.test.ts | todo |  |
 | `test/integration/proxy_quotes_test.rb` | test/integration/routes/proxy-quotes.test.ts | todo |  |
 | `test/integration/proxy_status_test.rb` | test/integration/routes/proxy-status.test.ts | todo |  |
-| `test/integration/setup_test.rb` | test/integration/routes/setup.test.ts | todo |  |
-| `test/integration/trade_ins_test.rb` | test/integration/routes/trade-ins.test.ts | todo |  |
+| `test/integration/setup_test.rb` | test/integration/routes/admin-setup-services.test.ts | done |  |
+| `test/integration/trade_ins_test.rb` | test/integration/routes/admin-trade-ins.test.ts | wip | admin half done (workflow mocked); storefront half is w2-proxy |
 
 ### Tests: support and helpers (6)
 

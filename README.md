@@ -27,11 +27,13 @@ sends its own emails, and Flow and Klaviyo become optional integrations.
 ```
 app/
   routes/            React Router routes: app.* (admin), proxy.* (App Proxy), webhooks.*, files.$
+  components/        admin UI pieces (Polaris web components): forms, flash toast, downloads
   models/            one module per Rails model: validations, enums, business rules (plain functions over Prisma rows)
   shopify/           Admin API (GraphQL) calls: draft orders, discounts, store credit, orders, products, shop
   lib/               infrastructure and pure helpers: encryption, signing, GIDs, customer token, storage,
                      background dispatch, webhooks, http caching, row locks, Postgres cache, proxy throttling
-  services/          domain services (Rails app/services): notifications, items, care, warranty, repairs, …
+  services/          domain services (Rails app/services): notifications, items, care, warranty, repairs, …;
+                     services/admin/* holds the admin screens' loaders/actions logic
   jobs/              background job handlers + registry
   shopify.server.ts  @shopify/shopify-app-react-router setup (Prisma session storage)
   db.server.ts       Prisma client

@@ -32,6 +32,8 @@ export interface EmailMessage {
   tags?: Record<string, string>;
   /** Stable per event, e.g. "repair_received:ticket_123"; providers drop repeats. */
   idempotencyKey: string;
+  /** Extra headers, e.g. List-Unsubscribe on marketing email. */
+  headers?: Record<string, string>;
 }
 
 export interface EmailResult {
@@ -125,6 +127,7 @@ export class ResendEmailAdapter implements EmailAdapter {
           text: message.text,
           replyTo: message.replyTo,
           tags,
+          headers: message.headers,
         },
         { idempotencyKey: message.idempotencyKey },
       );
@@ -184,8 +187,17 @@ export async function sendEmail(message: EmailMessage): Promise<EmailResult> {
     throw new Error("sendEmail needs an idempotencyKey.");
   if ([message.to].flat().length === 0)
     throw new Error("sendEmail needs a recipient.");
+  const headers = message.headers
+    ? Object.fromEntries(
+        Object.entries(message.headers).map(([name, value]) => [
+          name.replace(/[^A-Za-z0-9-]/g, ""),
+          value.replace(/[\r\n]+/g, " "),
+        ]),
+      )
+    : undefined;
   return getEmailAdapter().send({
     ...message,
+    headers,
     from: fromAddress(message.fromName),
   });
 }

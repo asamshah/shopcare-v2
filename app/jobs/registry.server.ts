@@ -14,6 +14,7 @@
  * docs/PORTING.md.
  */
 import { exampleJob } from "./example.server";
+import { notificationJob } from "./notification.server";
 import { webhookJob } from "./webhook.server";
 
 export type JobPayload = Record<string, unknown>;
@@ -21,6 +22,7 @@ export type JobHandler = (payload: JobPayload) => Promise<void>;
 
 export const jobs = {
   example: exampleJob,
+  notification: notificationJob,
   webhook: webhookJob,
 } satisfies Record<string, JobHandler>;
 

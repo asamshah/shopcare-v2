@@ -76,7 +76,7 @@ describe("performOutboundWebhook", () => {
       shop: "wh.myshopify.com",
       ticket: { id: 5, status: "in_repair" },
     });
-    expect(request.headers["X-Repairs-Hmac-Sha256"]).toMatch(/^[0-9a-f]{64}$/);
+    expect(request.headers["X-ShopCare-Hmac-Sha256"]).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("no-ops if the shop's webhook was cleared after enqueue, or the ticket is gone", async () => {

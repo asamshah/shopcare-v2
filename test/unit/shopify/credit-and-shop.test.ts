@@ -155,6 +155,70 @@ describe("discount codes", () => {
 });
 
 describe("refundLineItem", () => {
+  it("refunds in the presentment currency when the customer paid in another currency", async () => {
+    const api = new FakeGraphql({
+      suggestedRefund: {
+        order: {
+          currencyCode: "GBP",
+          presentmentCurrencyCode: "EUR",
+          suggestedRefund: {
+            suggestedTransactions: [
+              {
+                gateway: "shopify_payments",
+                amountSet: {
+                  shopMoney: { amount: "15.00", currencyCode: "GBP" },
+                  presentmentMoney: { amount: "17.40", currencyCode: "EUR" },
+                },
+                parentTransaction: { id: "gid://shopify/OrderTransaction/3" },
+              },
+            ],
+          },
+        },
+      },
+      refundCreate: {
+        refundCreate: { refund: { id: "gid://shopify/Refund/8" }, userErrors: [] },
+      },
+    });
+
+    await refundLineItem(api, { orderId: "9", lineItemId: "55", note: "n" });
+
+    const input = api.calls[1].variables.input as Record<string, unknown>;
+    expect(input.currency).toBe("EUR");
+    expect(input.transactions).toEqual([
+      expect.objectContaining({ amount: "17.40", kind: "REFUND" }),
+    ]);
+  });
+
+  it("uses shop money (and no currency) when the order is in the shop's currency", async () => {
+    const api = new FakeGraphql({
+      suggestedRefund: {
+        order: {
+          currencyCode: "GBP",
+          presentmentCurrencyCode: "GBP",
+          suggestedRefund: {
+            suggestedTransactions: [
+              {
+                gateway: "shopify_payments",
+                amountSet: {
+                  shopMoney: { amount: "15.00", currencyCode: "GBP" },
+                  presentmentMoney: { amount: "15.00", currencyCode: "GBP" },
+                },
+                parentTransaction: null,
+              },
+            ],
+          },
+        },
+      },
+      refundCreate: {
+        refundCreate: { refund: { id: "gid://shopify/Refund/8" }, userErrors: [] },
+      },
+    });
+    await refundLineItem(api, { orderId: "9", lineItemId: "55", note: "n" });
+    const input = api.calls[1].variables.input as Record<string, unknown>;
+    expect(input).not.toHaveProperty("currency");
+    expect(input.transactions).toEqual([expect.objectContaining({ amount: "15.00" })]);
+  });
+
   it("refunds the line to the original payment from the suggested transactions", async () => {
     const api = new FakeGraphql({
       suggestedRefund: {

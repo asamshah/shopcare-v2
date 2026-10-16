@@ -2,6 +2,11 @@
  * Refunds one line (a Care plan) on its original order, back to the original
  * payment, using Shopify's suggested refund transactions. Ported from Rails
  * `Care::PlanRefunder`; the caller passes the ids and the note.
+ *
+ * Multi-currency orders: when the customer paid in a currency other than the
+ * shop's (presentment ≠ shop currency), the refund is made in the presentment
+ * currency, which Shopify requires: `RefundInput.currency` is set and each
+ * transaction's amount comes from `presentmentMoney`. Otherwise shop money.
  */
 import { buildGid } from "../lib/gid";
 import {
@@ -14,10 +19,15 @@ import {
 export const SUGGESTED_REFUND_QUERY = `#graphql
   query SuggestedRefund($id: ID!, $lines: [RefundLineItemInput!]) {
     order(id: $id) {
+      currencyCode
+      presentmentCurrencyCode
       suggestedRefund(refundLineItems: $lines) {
         suggestedTransactions {
           gateway
-          amountSet { shopMoney { amount } }
+          amountSet {
+            shopMoney { amount currencyCode }
+            presentmentMoney { amount currencyCode }
+          }
           parentTransaction { id }
         }
       }
@@ -45,9 +55,14 @@ export interface RefundLineOptions {
   notify?: boolean;
 }
 
+interface MoneyV2 {
+  amount: string;
+  currencyCode?: string;
+}
+
 interface SuggestedTransaction {
   gateway: string | null;
-  amountSet: { shopMoney: { amount: string } };
+  amountSet: { shopMoney: MoneyV2; presentmentMoney?: MoneyV2 | null };
   parentTransaction: { id: string } | null;
 }
 
@@ -66,20 +81,34 @@ export async function refundLineItem(
   ];
   const suggested = await adminGraphql<{
     order: {
+      currencyCode?: string | null;
+      presentmentCurrencyCode?: string | null;
       suggestedRefund: { suggestedTransactions: SuggestedTransaction[] } | null;
     } | null;
   }>(client, SUGGESTED_REFUND_QUERY, { id: orderId, lines });
-  if (!suggested.order) throw new Error(`Order ${options.orderId} not found`);
+  const order = suggested.order;
+  if (!order) throw new Error(`Order ${options.orderId} not found`);
 
-  const transactions = (
-    suggested.order.suggestedRefund?.suggestedTransactions ?? []
-  ).map((t) => ({
-    orderId,
-    parentId: t.parentTransaction?.id,
-    gateway: t.gateway,
-    amount: t.amountSet.shopMoney.amount,
-    kind: "REFUND",
-  }));
+  const presentment =
+    order.presentmentCurrencyCode &&
+    order.currencyCode &&
+    order.presentmentCurrencyCode !== order.currencyCode
+      ? order.presentmentCurrencyCode
+      : null;
+  const transactions = (order.suggestedRefund?.suggestedTransactions ?? []).map(
+    (t) => {
+      const money = presentment ? t.amountSet.presentmentMoney : t.amountSet.shopMoney;
+      if (!money)
+        throw new Error(`Order ${options.orderId}: no ${presentment} amount to refund`);
+      return {
+        orderId,
+        parentId: t.parentTransaction?.id,
+        gateway: t.gateway,
+        amount: money.amount,
+        kind: "REFUND",
+      };
+    },
+  );
 
   const data = await adminGraphql<{
     refundCreate: { refund: { id: string } | null; userErrors: UserError[] };
@@ -90,6 +119,7 @@ export async function refundLineItem(
       note: options.note,
       refundLineItems: lines,
       transactions,
+      ...(presentment ? { currency: presentment } : {}),
     },
   });
   assertNoUserErrors("refundCreate", data.refundCreate);

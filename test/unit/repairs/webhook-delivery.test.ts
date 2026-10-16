@@ -36,8 +36,10 @@ describe("headers", () => {
     });
 
     expect(headers["Content-Type"]).toBe("application/json");
-    expect(headers["X-Repairs-Event"]).toBe("payment");
-    expect(headers["X-Repairs-Hmac-Sha256"]).toBe(
+    // v2 names (Rails sent Repairs-App-Webhook / X-Repairs-*).
+    expect(headers["User-Agent"]).toBe("ShopCare-Webhook/1.0");
+    expect(headers["X-ShopCare-Event"]).toBe("payment");
+    expect(headers["X-ShopCare-Hmac-Sha256"]).toBe(
       createHmac("sha256", "s3cret").update(body).digest("hex"),
     );
   });
@@ -45,7 +47,7 @@ describe("headers", () => {
   it("omits the signature header when no secret is configured", () => {
     expect(
       buildWebhookHeaders("{}", { event: "submitted" }),
-    ).not.toHaveProperty("X-Repairs-Hmac-Sha256");
+    ).not.toHaveProperty("X-ShopCare-Hmac-Sha256");
   });
 });
 
@@ -193,7 +195,7 @@ describe("deliverWebhook", () => {
     const request = transport.mock.calls[0][0];
     expect(request.address).toBe("93.184.216.34");
     expect(request.url.hostname).toBe("hooks.example.com");
-    expect(request.headers["X-Repairs-Hmac-Sha256"]).toBe(
+    expect(request.headers["X-ShopCare-Hmac-Sha256"]).toBe(
       createHmac("sha256", "s").update(request.body).digest("hex"),
     );
   });
@@ -266,7 +268,7 @@ describe("nodeTransport", () => {
 
     expect(result).toEqual({ status: 204 });
     expect(received?.body).toBe('{"event":"x"}');
-    expect(received?.headers["x-repairs-event"]).toBe("x");
+    expect(received?.headers["x-shopcare-event"]).toBe("x");
     expect(received?.headers.host).toBe(`hooks.example.invalid:${port}`);
   });
 

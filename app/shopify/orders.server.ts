@@ -173,9 +173,15 @@ export function orderFromGraphql(node: OrderNode): OrderData {
   };
 }
 
-/** The REST-shaped body of an orders/paid (or orders/*) webhook. */
+/**
+ * The REST-shaped body of an orders/paid (or orders/*) webhook. JSON.parse
+ * turns its numeric `id`s into JS numbers, which can't hold every 64-bit id
+ * exactly, so ids are read from `admin_graphql_api_id` (a GID string) when
+ * the payload has it, and the number only as a fallback.
+ */
 export interface OrderWebhookBody {
   id: number | string;
+  admin_graphql_api_id?: string | null;
   name?: string;
   processed_at?: string | null;
   created_at?: string | null;
@@ -183,12 +189,14 @@ export interface OrderWebhookBody {
   tags?: string | null;
   customer?: {
     id?: number | string | null;
+    admin_graphql_api_id?: string | null;
     email?: string | null;
     first_name?: string | null;
     last_name?: string | null;
   } | null;
   line_items?: {
     id: number | string;
+    admin_graphql_api_id?: string | null;
     product_id?: number | string | null;
     variant_id?: number | string | null;
     title?: string;
@@ -203,13 +211,22 @@ export interface OrderWebhookBody {
   }[];
 }
 
+/** A webhook object's id as a string: from its GID when present. */
+function webhookId(object: {
+  id?: number | string | null;
+  admin_graphql_api_id?: string | null;
+}): string | null {
+  if (object.admin_graphql_api_id) return numericId(object.admin_graphql_api_id);
+  return object.id == null || object.id === "" ? null : String(object.id);
+}
+
 export function orderFromWebhook(body: OrderWebhookBody): OrderData {
   const customer = body.customer ?? {};
   return {
-    id: String(body.id),
+    id: webhookId(body) ?? "",
     name: body.name ?? "",
     processedAt: parseTime(body.processed_at ?? body.created_at ?? null),
-    customerId: customer.id == null ? null : String(customer.id),
+    customerId: webhookId(customer),
     email: presence(body.email) ?? presence(customer.email),
     customerName: presence(
       [customer.first_name, customer.last_name]
@@ -221,7 +238,7 @@ export function orderFromWebhook(body: OrderWebhookBody): OrderData {
       .map((t) => t.trim().toLowerCase())
       .filter(Boolean),
     lines: (body.line_items ?? []).map((line) => ({
-      id: String(line.id),
+      id: webhookId(line) ?? "",
       productId: line.product_id == null ? null : String(line.product_id),
       variantId: line.variant_id == null ? null : String(line.variant_id),
       title: line.title ?? "",

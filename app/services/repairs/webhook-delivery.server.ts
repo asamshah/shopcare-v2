@@ -18,7 +18,7 @@ import https from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
 
 const TIMEOUT_MS = 5000;
-export const USER_AGENT = "Repairs-App-Webhook/1.0";
+export const USER_AGENT = "ShopCare-Webhook/1.0";
 
 export type Resolver = (
   hostname: string,
@@ -162,8 +162,8 @@ export function buildWebhookHeaders(
     "Content-Type": "application/json",
     "User-Agent": USER_AGENT,
   };
-  if (event) headers["X-Repairs-Event"] = event;
-  if (secret) headers["X-Repairs-Hmac-Sha256"] = webhookSignature(secret, body);
+  if (event) headers["X-ShopCare-Event"] = event;
+  if (secret) headers["X-ShopCare-Hmac-Sha256"] = webhookSignature(secret, body);
   return headers;
 }
 

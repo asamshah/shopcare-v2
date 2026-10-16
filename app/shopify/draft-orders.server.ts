@@ -89,8 +89,12 @@ export type DraftOrderLine =
       variantId: string;
       quantity: number;
       /**
-       * Optional price instead of the variant's catalogue price. REST ignored
-       * `price` on variant lines, so the Rails behaviour is to leave it unset.
+       * The price to charge instead of the variant's catalogue price. Repair
+       * quotes always send it (quoteDraftOrderAttributes in
+       * app/services/repairs/quote-draft-order.server.ts), so the invoice
+       * total matches the quote. Rails passed `price`, which REST silently
+       * ignored on variant lines: a quote priced differently from the catalogue
+       * produced an invoice for the catalogue price.
        */
       priceOverride?: number | string;
       appliedDiscount?: DraftOrderDiscount;

@@ -118,7 +118,7 @@ export function itemLabel(item: Pick<Item, "productTitle" | "variantTitle">): st
 }
 
 /** Rails `scope :for_customer`: nothing for a blank customer id. */
-export function forCustomerWhere(customerId: string | number | null | undefined): Prisma.ItemWhereInput {
+export function forCustomerWhere(customerId: string | null | undefined): Prisma.ItemWhereInput {
   const id = customerId === null || customerId === undefined ? "" : String(customerId).trim();
   return id ? { shopifyCustomerId: id } : { id: { in: [] } };
 }

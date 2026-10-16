@@ -62,6 +62,30 @@ function orderNode(
 }
 
 describe("order data", () => {
+  it("reads webhook ids from admin_graphql_api_id, so they never pass through a JS number", () => {
+    const order = orderFromWebhook({
+      // What JSON.parse makes of an id past 2^53: already rounded.
+      id: Number("9007199254740993"),
+      admin_graphql_api_id: "gid://shopify/Order/9007199254740993",
+      customer: {
+        id: Number("9007199254740995"),
+        admin_graphql_api_id: "gid://shopify/Customer/9007199254740995",
+      },
+      line_items: [
+        {
+          id: Number("9007199254740997"),
+          admin_graphql_api_id: "gid://shopify/LineItem/9007199254740997",
+          quantity: 1,
+          price: "10.00",
+        },
+      ],
+    });
+    expect(order.id).toBe("9007199254740993");
+    expect(order.customerId).toBe("9007199254740995");
+    expect(order.lines[0].id).toBe("9007199254740997");
+    expect(orderFromWebhook({ id: 1, customer: null }).customerId).toBeNull();
+  });
+
   it("normalises an orders/paid webhook body", () => {
     const order = orderFromWebhook({
       id: "820982911946154508",

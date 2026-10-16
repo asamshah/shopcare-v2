@@ -8,14 +8,18 @@ export function hmacHex(secret: string | Buffer, data: string): string {
   return createHmac("sha256", secret).update(data).digest("hex");
 }
 
+const HEX = /^(?:[0-9a-f]{2})+$/i;
+
+/**
+ * Constant-time comparison of two hex digests. Both must be non-empty,
+ * even-length, all-hex and the same length; anything else is unequal. (Without
+ * this, Buffer.from(s, "hex") stops at the first non-hex character, so a
+ * signature with trailing junk would compare equal.)
+ */
 export function safeEqualHex(a: string, b: string): boolean {
-  const left = Buffer.from(a, "hex");
-  const right = Buffer.from(b, "hex");
-  return (
-    left.length === right.length &&
-    left.length > 0 &&
-    timingSafeEqual(left, right)
-  );
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.length !== b.length || !HEX.test(a) || !HEX.test(b)) return false;
+  return timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
 }
 
 /**

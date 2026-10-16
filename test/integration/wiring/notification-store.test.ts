@@ -2,10 +2,9 @@
  * PrismaNotificationStore and the Shop-row settings loader against Postgres,
  * plus one emit → deliver round trip through them.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import prisma from "../../../app/db.server";
 import { encrypt } from "../../../app/lib/encryption.server";
-import { LogEmailAdapter, setEmailAdapter } from "../../../app/services/email.server";
 import {
   deliverNotification,
   emitNotification,
@@ -16,13 +15,11 @@ import { loadNotificationSettings } from "../../../app/services/notifications/sh
 import { createShop } from "../../support/factories";
 import { FakeGraphql } from "../../support/fake-graphql";
 
-afterEach(() => setEmailAdapter(undefined));
-
 const store = () => new PrismaNotificationStore(prisma);
 const claimInput = (shopId: string) => ({
   shopId,
   event: "care_activated" as const,
-  channel: "email" as const,
+  channel: "flow" as const,
   idempotencyKey: "care_activated:cover_7",
   payload: {
     recipient: { customerId: "77", email: "a@example.com" },
@@ -48,7 +45,7 @@ describe("PrismaNotificationStore", () => {
     expect(await prisma.notificationDelivery.count()).toBe(1);
 
     // Another channel or another shop is a separate delivery.
-    await store().claim({ ...claimInput(shop.shopifyDomain), channel: "staff_email" });
+    await store().claim({ ...claimInput(shop.shopifyDomain), channel: "klaviyo" });
     const other = await createShop();
     await store().claim(claimInput(other.shopifyDomain));
     expect(await prisma.notificationDelivery.count()).toBe(3);
@@ -75,8 +72,8 @@ describe("PrismaNotificationStore", () => {
     expect(failed).toMatchObject({ status: "failed", attempts: 2 });
     expect(failed!.error).toHaveLength(500);
 
-    await s.markSent(delivery.id, "re_123");
-    expect(await s.find(delivery.id)).toMatchObject({ status: "sent", providerMessageId: "re_123", error: null });
+    await s.markSent(delivery.id);
+    expect(await s.find(delivery.id)).toMatchObject({ status: "sent", error: null });
     await s.markSkipped(delivery.id, "Turned off");
     expect(await s.find(delivery.id)).toMatchObject({ status: "skipped", error: "Turned off" });
   });
@@ -93,15 +90,6 @@ describe("loadNotificationSettings", () => {
     const shop = await createShop({ shopifyDomain: "acme-boots.myshopify.com" });
     expect(await loadNotificationSettings(shop.shopifyDomain)).toEqual({
       shopId: "acme-boots.myshopify.com",
-      shopName: "Acme Boots",
-      logoUrl: null,
-      accentColor: null,
-      addressLines: null,
-      storeUrl: "https://acme-boots.myshopify.com",
-      supportEmail: null,
-      staffEmail: null,
-      locale: null,
-      emails: {},
       flowEnabled: false,
       klaviyoApiKey: null,
       careOfferDelayDays: 7,
@@ -113,25 +101,15 @@ describe("loadNotificationSettings", () => {
       settings: {
         shop_name: "Acme",
         contact_email: "hello@acme.example",
-        notifications: {
-          flow: true,
-          staff_email: "workshop@acme.example",
-          address_lines: ["1 Lane", " "],
-          care_offer_delay_days: "10",
-          emails: { care_offer: { enabled: true, subject: " Add Care " }, bogus: { enabled: false } },
-        },
+        notifications: { flow: true, care_offer_delay_days: "10" },
       },
       klaviyoApiKeyCiphertext: encrypt("pk_live", "Shop.klaviyoApiKey"),
     });
-    expect(await loadNotificationSettings(shop.shopifyDomain)).toMatchObject({
-      shopName: "Acme",
-      supportEmail: "hello@acme.example",
-      staffEmail: "workshop@acme.example",
-      addressLines: ["1 Lane"],
+    expect(await loadNotificationSettings(shop.shopifyDomain)).toEqual({
+      shopId: shop.shopifyDomain,
       flowEnabled: true,
       klaviyoApiKey: "pk_live",
       careOfferDelayDays: 10,
-      emails: { care_offer: { enabled: true, subject: "Add Care", intro: null } },
     });
   });
 
@@ -143,16 +121,14 @@ describe("loadNotificationSettings", () => {
 });
 
 describe("emit → deliver through Postgres", () => {
-  it("sends once, and a duplicate emit sends nothing more", async () => {
-    const email = new LogEmailAdapter(true);
-    setEmailAdapter(email);
-    const shop = await createShop({ settings: { shop_name: "Acme" } });
+  it("fires the Flow trigger once, and a duplicate emit sends nothing more", async () => {
+    const shop = await createShop({ settings: { notifications: { flow: true } } });
     const enqueued: string[] = [];
+    const flow = new FakeGraphql({ flowTriggerReceive: { flowTriggerReceive: { userErrors: [] } } });
     const deps: NotificationDeps = {
       store: store(),
       loadSettings: (domain) => loadNotificationSettings(domain),
-      hasEmailMarketingConsent: vi.fn(async () => true),
-      adminClient: async () => new FakeGraphql({}),
+      adminClient: async () => flow,
       enqueue: async (_job, { deliveryId }) => {
         enqueued.push(deliveryId);
       },
@@ -168,9 +144,8 @@ describe("emit → deliver through Postgres", () => {
 
     await deliverNotification(enqueued[0], deps);
     await deliverNotification(enqueued[0], deps);
-    expect(email.sent).toHaveLength(1);
+    expect(flow.calls).toHaveLength(1);
     const row = await prisma.notificationDelivery.findFirstOrThrow();
-    expect(row).toMatchObject({ status: "sent", channel: "email", idempotencyKey: "care_activated:cover_7" });
-    expect(row.providerMessageId).toBeTruthy();
+    expect(row).toMatchObject({ status: "sent", channel: "flow", idempotencyKey: "care_activated:cover_7" });
   });
 });

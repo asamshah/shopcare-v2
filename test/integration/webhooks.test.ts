@@ -12,7 +12,6 @@ import { setWebhookJobDeps } from "../../app/jobs/webhook.server";
 import { MemoryStorage, verifySignedUrl } from "../../app/lib/storage.server";
 import { moveStock } from "../../app/models/part-variant.server";
 import { createCover, warrantyCoverFor } from "../../app/models/cover.server";
-import type { EmailMessage } from "../../app/services/email.server";
 import { action as appUninstalled } from "../../app/routes/webhooks.app.uninstalled";
 import { action as dataRequest } from "../../app/routes/webhooks.customers.data_request";
 import { action as customersRedact } from "../../app/routes/webhooks.customers.redact";
@@ -48,7 +47,6 @@ const deliver = (route: Action, topic: string, shop: string, payload: unknown) =
 describe("Shopify webhooks", () => {
   let shop: Shop;
   let storage: MemoryStorage;
-  let sent: EmailMessage[];
   let api: FakeDraftOrders;
 
   beforeEach(async () => {
@@ -57,16 +55,11 @@ describe("Shopify webhooks", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const notify = dbNotifyDeps();
     storage = new MemoryStorage();
-    sent = [];
     api = new FakeDraftOrders();
     setWebhookJobDeps({
       client: async () => api.client,
       notifyDeps: notify.deps,
       storage,
-      send: async (message) => {
-        sent.push(message);
-        return { id: `m${sent.length}`, adapter: "test" };
-      },
       enqueue: async () => {},
     });
     shop = await createShop({ shopifyDomain: "jobs-test.myshopify.com" });
@@ -333,11 +326,7 @@ describe("Shopify webhooks", () => {
   });
 
   describe("customers/data_request", () => {
-    it("leaves data intact, stores a JSON export and emails the merchant a download link", async () => {
-      shop = await prisma.shop.update({
-        where: { id: shop.id },
-        data: { settings: { notifications: { staff_email: "workshop@shop.test" } } },
-      });
+    it("leaves data intact and stores a JSON export the admin lists (no email)", async () => {
       const ticket = await createRepairTicketFor(shop, {
         shopifyCustomerId: "9",
         customerEmail: "a@example.com",
@@ -366,18 +355,19 @@ describe("Shopify webhooks", () => {
       expect(exported.repair_tickets[0].quotes[0]).not.toHaveProperty("decisionTokenCiphertext");
       expect(exported.items).toHaveLength(1);
 
-      expect(sent).toHaveLength(2);
-      expect(sent[0]).toMatchObject({ to: "workshop@shop.test", idempotencyKey: "jobs-test.myshopify.com:gdpr-export:9999" });
-      expect(sent[1].idempotencyKey).toBe(sent[0].idempotencyKey);
-      const link = sent[0].text.split("\n\n").find((p) => p.includes("/files/"))!;
-      expect(verifySignedUrl(new URL(link))).toBe(key);
-      const settings = (await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } })).settings as { gdpr_exports: unknown[] };
-      expect(settings.gdpr_exports).toHaveLength(1);
-    });
-
-    it("falls back to the shop owner's Shopify email", async () => {
-      await deliver(dataRequest, "customers/data_request", shop.shopifyDomain, { customer: { id: 9 }, data_request: { id: 1 } });
-      expect(sent[0].to).toBe("owner@shop.test");
+      // Retried webhook: one entry, with who asked and what was found.
+      const settings = (await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } })).settings as {
+        gdpr_exports: Record<string, unknown>[];
+      };
+      expect(settings.gdpr_exports).toEqual([
+        {
+          key,
+          request_id: "9999",
+          created_at: expect.any(String),
+          customer: "a@example.com",
+          counts: { tickets: 1, items: 1, tradeIns: 0, deliveries: 0 },
+        },
+      ]);
     });
   });
 });

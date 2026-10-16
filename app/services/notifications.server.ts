@@ -1,42 +1,36 @@
 /**
- * Notifications: ShopCare's own customer and staff emails, plus the optional
- * Shopify Flow and Klaviyo integrations. Ported from Rails
- * Notifications::Dispatcher + NotificationJob, redesigned per "Notifications
- * (v2 design)" in docs/PORTING.md.
+ * Notifications: the optional Shopify Flow and Klaviyo integrations. Ported
+ * from Rails Notifications::Dispatcher + NotificationJob.
+ *
+ * ShopCare sends no email of its own: Shopify does (draft-order invoice,
+ * Order confirmation snippet, Shipping confirmation; docs/PORTING.md →
+ * Notifications). Events go to Flow (when the merchant turns it on) and
+ * Klaviyo (when a key is saved), so merchants can build their own staff and
+ * customer emails on them.
  *
  * Two halves:
  *
  *   emitNotification()   called from requests and webhook jobs. Works out the
- *                        channels (per-email toggles, Flow on, Klaviyo key),
- *                        claims one delivery per channel under the
- *                        idempotency key `<event>:<record>`, and enqueues the
- *                        "notification" job for each new one. Never sends.
+ *                        channels (Flow on, Klaviyo key), claims one delivery
+ *                        per channel under the idempotency key
+ *                        `<event>:<record>`, and enqueues the "notification"
+ *                        job for each new one. Never sends.
  *
  *   deliverNotification() the "notification" background job. Loads the
- *                        delivery and the shop's current settings, re-checks
- *                        the toggle, checks marketing consent at send time,
- *                        renders and sends. A retryable failure is rethrown so
- *                        the background function retries; after
- *                        `maxAttempts`, or on a permanent error, the delivery
- *                        is marked failed.
+ *                        delivery and the shop's current settings and fires
+ *                        the Flow trigger or Klaviyo event. A retryable
+ *                        failure is rethrown so the background function
+ *                        retries; after `maxAttempts`, or on a permanent
+ *                        error, the delivery is marked failed.
  *
- * Dependencies are passed in (store, settings loader, consent checker, Admin
- * GraphQL client), so everything here runs in tests without a database; the
- * job uses the production wiring by default (getNotificationDeps).
+ * Dependencies are passed in (store, settings loader, Admin GraphQL client),
+ * so everything here runs in tests without a database; the job uses the
+ * production wiring by default (getNotificationDeps).
  */
-import {
-  EmailDeliveryError,
-  sendEmail as defaultSendEmail,
-  type EmailAttachment,
-  type EmailMessage,
-} from "./email.server";
 import { DeliveryError } from "./notifications/delivery-error.server";
 import {
   EVENTS,
-  MARKETING_EMAILS,
-  customerEmailFor,
   type Channel,
-  type EmailKind,
   type EventData,
   type EventName,
 } from "./notifications/events.server";
@@ -44,16 +38,12 @@ import type { AdminGraphqlClient } from "../shopify/graphql.server";
 import { FlowClient } from "./notifications/flow-client.server";
 import { KlaviyoClient } from "./notifications/klaviyo-client.server";
 import { productionNotificationDeps } from "./notifications/production-deps.server";
-import {
-  isEmailEnabled,
-  type ShopNotificationSettings,
-} from "./notifications/settings.server";
+import type { ShopNotificationSettings } from "./notifications/settings.server";
 import type {
   DeliveryRecipient,
   NotificationDelivery,
   NotificationStore,
 } from "./notifications/store.server";
-import { renderEmail, type EmailData } from "./notifications/templates.server";
 
 export const DEFAULT_MAX_ATTEMPTS = 3;
 
@@ -61,39 +51,9 @@ export interface NotificationDeps {
   store: NotificationStore;
   /** The shop's current settings, or null once the shop is gone (uninstalled). */
   loadSettings(shopId: string): Promise<ShopNotificationSettings | null>;
-  /** Marketing consent at send time; see consent.server.ts for the Shopify-backed one. */
-  hasEmailMarketingConsent(
-    recipient: DeliveryRecipient,
-    context: { shopId: string },
-  ): Promise<boolean>;
   /** An Admin GraphQL client for the shop (offline session), for Flow triggers. */
   adminClient(shopId: string): Promise<AdminGraphqlClient>;
-  /**
-   * The one-click unsubscribe URL for a marketing email. Without one the
-   * marketing email is skipped.
-   */
-  unsubscribeUrl?(
-    shopId: string,
-    recipient: DeliveryRecipient,
-  ): string | null | undefined;
-  /**
-   * The suppression list (unsubscribes, bounces, complaints;
-   * notifications/suppressions.server.ts). Suppressed addresses are dropped
-   * before sending; with none left the delivery is skipped.
-   */
-  isSuppressed?(
-    shopId: string,
-    email: string,
-    options: { marketing: boolean },
-  ): Promise<boolean>;
-  /**
-   * The files a customer email carries when its event names an `attachment`
-   * (the postage slip; repairs/postage-slip.server.ts). Throw a non-retryable
-   * DeliveryError when the file can't be made. Without this dependency the
-   * email goes out without the file (its download link still works).
-   */
-  attachments?(delivery: NotificationDelivery): Promise<EmailAttachment[]>;
-  sendEmail?: (message: EmailMessage) => Promise<{ id: string }>;
+  /** For the Klaviyo client (tests pass a fake). */
   fetch?: typeof fetch;
   /** Defaults to app/lib/background.server.ts `enqueue`. */
   enqueue?: (
@@ -118,8 +78,7 @@ export function setNotificationDeps(deps: NotificationDeps | undefined) {
 
 /**
  * The job's dependencies: whatever setNotificationDeps() set, else the
- * production wiring (Prisma store, Shop-row settings, Shopify consent and
- * clients; notifications/production-deps.server.ts). Under Vitest there is no
+ * production wiring (Prisma store, Shop-row settings, Shopify clients; notifications/production-deps.server.ts). Under Vitest there is no
  * default, so a test can't send through the real database by accident.
  */
 export function getNotificationDeps(): NotificationDeps {
@@ -163,16 +122,10 @@ export function idempotencyKey<E extends EventName>(
 /** The channels an event goes to for this shop right now. */
 export function channelsFor<E extends EventName>(
   event: E,
-  data: EventData[E],
   settings: ShopNotificationSettings,
 ): Channel[] {
   const def = EVENTS[event];
   const channels: Channel[] = [];
-  const customerEmail = customerEmailFor(event, data);
-  if (customerEmail && isEmailEnabled(settings, customerEmail))
-    channels.push("email");
-  if (def.staffEmail && isEmailEnabled(settings, def.staffEmail))
-    channels.push("staff_email");
   if (def.flowHandle && settings.flowEnabled) channels.push("flow");
   if (def.klaviyoMetric && settings.klaviyoApiKey) channels.push("klaviyo");
   return channels;
@@ -193,7 +146,7 @@ export async function emitNotification<E extends EventName>(
 
   const key = idempotencyKey(event, data);
   const deliveries: NotificationDelivery[] = [];
-  for (const channel of channelsFor(event, data, settings)) {
+  for (const channel of channelsFor(event, settings)) {
     const { delivery, created } = await deps.store.claim({
       shopId: settings.shopId,
       event,
@@ -210,8 +163,7 @@ export async function emitNotification<E extends EventName>(
 // ---------------------------------------------------------------------------
 // Deliver
 
-type Outcome =
-  { sent: true; providerMessageId?: string } | { sent: false; reason: string };
+type Outcome = { sent: true } | { sent: false; reason: string };
 
 const skip = (reason: string): Outcome => ({ sent: false, reason });
 
@@ -230,10 +182,7 @@ export async function deliverNotification(
       ? await deliverTo(delivery, settings, deps)
       : skip("The shop no longer has ShopCare installed");
   } catch (error) {
-    const retryable =
-      error instanceof EmailDeliveryError || error instanceof DeliveryError
-        ? error.retryable
-        : true;
+    const retryable = error instanceof DeliveryError ? error.retryable : true;
     const max = deps.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     const final = !retryable || delivery.attempts + 1 >= max;
     const message = error instanceof Error ? error.message : String(error);
@@ -246,7 +195,7 @@ export async function deliverNotification(
   }
 
   if (outcome.sent) {
-    await deps.store.markSent(delivery.id, outcome.providerMessageId);
+    await deps.store.markSent(delivery.id);
   } else {
     await deps.store.markSkipped(delivery.id, outcome.reason);
     console.info(
@@ -268,21 +217,6 @@ async function deliverTo(
   );
 
   switch (delivery.channel) {
-    case "email": {
-      const kind = customerEmailFor(delivery.event, data);
-      if (!kind) return skip("No customer email for this event");
-      return sendShopEmail(delivery, settings, deps, kind, recipient.email);
-    }
-    case "staff_email": {
-      if (!def.staffEmail) return skip("No staff alert for this event");
-      return sendShopEmail(
-        delivery,
-        settings,
-        deps,
-        def.staffEmail,
-        settings.staffEmail,
-      );
-    }
     case "flow": {
       if (!def.flowHandle) return skip("No Flow trigger for this event");
       if (!settings.flowEnabled) return skip("Shopify Flow is turned off");
@@ -308,88 +242,4 @@ async function deliverTo(
       return { sent: true };
     }
   }
-}
-
-async function sendShopEmail(
-  delivery: NotificationDelivery,
-  settings: ShopNotificationSettings,
-  deps: NotificationDeps,
-  kind: EmailKind,
-  to: string | null | undefined,
-): Promise<Outcome> {
-  // The merchant may have switched it off after the event was emitted.
-  if (!isEmailEnabled(settings, kind)) return skip("Turned off in Settings");
-  if (!to)
-    return skip(
-      delivery.channel === "staff_email"
-        ? "No staff alert address in Settings"
-        : "No customer email",
-    );
-
-  const marketing = MARKETING_EMAILS.includes(kind);
-  // "Notify staff at" may list several addresses.
-  let addresses = to
-    .split(/[,;]/)
-    .map((address) => address.trim())
-    .filter(Boolean);
-  if (deps.isSuppressed) {
-    const kept: string[] = [];
-    for (const address of addresses) {
-      if (!(await deps.isSuppressed(delivery.shopId, address, { marketing })))
-        kept.push(address);
-    }
-    addresses = kept;
-    if (addresses.length === 0)
-      return skip("Address suppressed (unsubscribed, bounced or complained)");
-  }
-
-  const { recipient } = delivery.payload;
-  let unsubscribeUrl: string | null | undefined;
-  const headers: Record<string, string> = {};
-  if (marketing) {
-    if (!recipient.customerId)
-      return skip("Guest customer: no email marketing consent");
-    const consent = await deps.hasEmailMarketingConsent(recipient, {
-      shopId: delivery.shopId,
-    });
-    if (!consent) return skip("Customer isn't subscribed to email marketing");
-    unsubscribeUrl = deps.unsubscribeUrl?.(delivery.shopId, recipient);
-    if (!unsubscribeUrl) return skip("No unsubscribe link available");
-    headers["List-Unsubscribe"] = `<${unsubscribeUrl}>`;
-    headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
-  }
-
-  const content = renderEmail(
-    kind,
-    delivery.payload.data as EmailData[typeof kind],
-    { settings, unsubscribeUrl },
-  );
-  // Staff can reply straight to the customer; customers reply to the shop.
-  const customerEmail = (
-    delivery.payload.data as { customerEmail?: string | null }
-  ).customerEmail;
-  const replyTo =
-    delivery.channel === "staff_email"
-      ? customerEmail || settings.supportEmail
-      : settings.supportEmail;
-
-  const attachments =
-    delivery.channel === "email" && EVENTS[delivery.event].attachment && deps.attachments
-      ? await deps.attachments(delivery)
-      : [];
-
-  const send = deps.sendEmail ?? defaultSendEmail;
-  const result = await send({
-    shopId: delivery.shopId,
-    to: addresses,
-    ...content,
-    replyTo: replyTo || undefined,
-    fromName: `${settings.shopName} via ShopCare`,
-    tags: { event: delivery.event, email: kind },
-    // Provider idempotency keys are account-wide, so scope them to shop and channel.
-    idempotencyKey: `${delivery.shopId}:${delivery.channel}:${delivery.idempotencyKey}`,
-    headers: Object.keys(headers).length ? headers : undefined,
-    ...(attachments.length ? { attachments } : {}),
-  });
-  return { sent: true, providerMessageId: result.id };
 }

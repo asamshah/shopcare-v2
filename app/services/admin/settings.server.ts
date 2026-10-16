@@ -1,6 +1,6 @@
 /**
  * Settings → save (Rails SettingsController#update / #klaviyo_test), plus the
- * v2 notification settings (docs/PORTING.md → Notifications → Settings).
+ * v2 settings.notifications keys (Flow on/off, status page, Add Care delay).
  *
  * Specific keys are read from the form rather than mass-assigned, so values
  * are safe to merge into shop.settings. Only sections present in the form are
@@ -22,10 +22,9 @@ import {
   WORKSHOP_ADDRESS_FIELDS,
 } from "../../models/shop.server";
 import { d, jsonObject } from "../../models/validation.server";
-import { EMAIL_KINDS } from "../notifications/events.server";
 import { KlaviyoClient } from "../notifications/klaviyo-client.server";
 import { permittedWebhookUrl } from "../repairs/webhook-delivery.server";
-import { bool, field, type Form, has, nested } from "./form.server";
+import { bool, field, type Form, has } from "./form.server";
 
 export interface SettingsDeps {
   permittedWebhookUrl: (url: string) => Promise<boolean>;
@@ -45,7 +44,6 @@ const clampInt = (value: string, min: number, max: number) => {
   return Math.min(Math.max(Number.isNaN(n) ? 0 : n, min), max);
 };
 
-const zEmailOrBlank = z.union([z.literal(""), z.string().email().max(320)]);
 const zUrlOrBlank = z.union([z.literal(""), z.string().url().max(2000)]);
 
 export type SaveResult = { ok: true } | { ok: false; alert: string };
@@ -147,10 +145,7 @@ export async function saveSettings(
   return { ok: true };
 }
 
-/**
- * settings.notifications: flow, staff_email, support_email, care_offer_delay_days,
- * status_url, emails.<kind>.{enabled,subject,intro}.
- */
+/** settings.notifications: flow, care_offer_delay_days, status_url. */
 function readNotifications(
   form: Form,
   current: Record<string, unknown>,
@@ -159,15 +154,6 @@ function readNotifications(
   let changed = false;
   if (has(form, "notifications[flow]")) {
     value.flow = castBoolean(field(form, "notifications[flow]"));
-    changed = true;
-  }
-  const labels: Record<string, string> = { staff_email: "Notify staff at", support_email: "Reply-to address" };
-  for (const key of ["staff_email", "support_email"]) {
-    const name = `notifications[${key}]`;
-    if (!has(form, name)) continue;
-    const email = field(form, name).trim();
-    if (!zEmailOrBlank.safeParse(email).success) return { alert: `${labels[key]} must be an email address.` };
-    value[key] = email;
     changed = true;
   }
   if (has(form, "notifications[care_offer_delay_days]")) {
@@ -183,24 +169,6 @@ function readNotifications(
     const url = field(form, "notifications[status_url]").trim();
     if (url && !/^https?:\/\/\S+$/i.test(url)) return { alert: "Repair status page must be a full web address (https://…)." };
     value.status_url = url;
-    changed = true;
-  }
-  const emails = { ...jsonObject(current.emails as Prisma.JsonValue) };
-  let emailsChanged = false;
-  for (const kind of EMAIL_KINDS) {
-    const prefix = `notifications[emails][${kind}]`;
-    const entry = nested(form, prefix);
-    if (!Object.keys(entry).length) continue;
-    emails[kind] = {
-      ...jsonObject(emails[kind] as Prisma.JsonValue),
-      ...(has(form, `${prefix}[enabled]`) ? { enabled: bool(form, `${prefix}[enabled]`) } : {}),
-      ...(has(form, `${prefix}[subject]`) ? { subject: field(form, `${prefix}[subject]`).trim().slice(0, 255) } : {}),
-      ...(has(form, `${prefix}[intro]`) ? { intro: field(form, `${prefix}[intro]`).trim().slice(0, 5000) } : {}),
-    };
-    emailsChanged = true;
-  }
-  if (emailsChanged) {
-    value.emails = emails;
     changed = true;
   }
   return { changed, value };

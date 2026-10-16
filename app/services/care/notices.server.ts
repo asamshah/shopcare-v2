@@ -1,7 +1,9 @@
 /**
- * The customer emails around a Care purchase. Port of Care::Notices:
- *   care_activated  confirmation for each Care plan bought (sent here, from
- *                   the orders/paid webhook)
+ * The events around a Care purchase (Flow / Klaviyo, when connected; the
+ * customer's confirmation is the Care section of Shopify's order
+ * confirmation). Port of Care::Notices:
+ *   care_activated  each Care plan bought (emitted here, from the
+ *                   orders/paid webhook)
  *   care_offer      v2: no longer sent straight after the order; the daily
  *                   care-offers job emits it `care_offer_delay_days` after
  *                   purchase (app/services/care/care-offers.server.ts)

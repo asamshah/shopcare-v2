@@ -2,7 +2,6 @@ import type { Shop } from "@prisma/client";
 import prisma from "../db.server";
 import type { FileStorage } from "../lib/storage.server";
 import { tradeInEnabled } from "../models/shop.server";
-import type { sendEmail } from "../services/email.server";
 import { notifyCareActivated } from "../services/care/notices.server";
 import { customerRefFromWebhook } from "../services/gdpr/customer-match.server";
 import { exportCustomerData } from "../services/gdpr/customer-export.server";
@@ -39,7 +38,7 @@ import type { JobPayload } from "./registry.server";
  *                           other order → Items + warranty/Care cover,
  *                           care_activated, trade-in linking (when enabled)
  *   REFUNDS_CREATE          processRefund (once per refund id) + Care refunds
- *   CUSTOMERS_DATA_REQUEST  exportCustomerData (JSON export, emailed link)
+ *   CUSTOMERS_DATA_REQUEST  exportCustomerData (JSON export, shown in the admin)
  *   CUSTOMERS_REDACT        redactCustomer
  *   SHOP_REDACT             redactShop
  *
@@ -52,7 +51,6 @@ export interface WebhookJobDeps {
   client?: (shop: Shop) => Promise<AdminGraphqlClient>;
   notifyDeps?: Pick<NotificationDeps, "store" | "enqueue">;
   storage?: FileStorage;
-  send?: typeof sendEmail;
   enqueue?: (name: "outbound-webhook", payload: JobPayload) => Promise<void>;
 }
 
@@ -131,17 +129,9 @@ const customersDataRequest: TopicHandler = async (shop, payload, ctx) => {
   const result = await exportCustomerData(shop, customerRefFromWebhook(payload), requestId, {
     db: ctx.db,
     storage: ctx.storage,
-    send: ctx.send,
-    shopOwnerEmail: async () => {
-      try {
-        return (await fetchShopInfo(await ctx.client())).email || null;
-      } catch {
-        return null; // uninstalled: no offline session any more
-      }
-    },
   });
   console.info(
-    `[job:webhook] customers/data_request shop=${shop.shopifyDomain} tickets=${result.counts.tickets} items=${result.counts.items} trade_ins=${result.counts.tradeIns} emailed=${Boolean(result.emailedTo)}`,
+    `[job:webhook] customers/data_request shop=${shop.shopifyDomain} tickets=${result.counts.tickets} items=${result.counts.items} trade_ins=${result.counts.tradeIns}`,
   );
 };
 

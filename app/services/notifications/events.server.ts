@@ -1,17 +1,18 @@
 /**
  * The notification events ShopCare emits, what each one carries, and which
  * channels it can go to. Ported from Rails `Notifications::Dispatcher::EVENTS`
- * (see "Notifications (v2 design)" in docs/PORTING.md).
+ * (see "Notifications" in docs/PORTING.md).
  *
- * One event fans out to up to four channels, each its own delivery record:
- *   email        the customer email ShopCare sends itself
- *   staff_email  the staff alert ShopCare sends to "Notify staff at"
- *   flow         a Shopify Flow trigger (optional integration)
- *   klaviyo      a Klaviyo metric (optional integration)
+ * ShopCare sends no email: Shopify does (the draft-order invoice, the Order
+ * confirmation snippet, the Shipping confirmation). Events are optional
+ * integrations the merchant can build their own emails on; one event fans out
+ * to up to two channels, each its own delivery record:
+ *   flow     a Shopify Flow trigger (when Flow is on in Settings)
+ *   klaviyo  a Klaviyo metric (when a Klaviyo key is saved)
  *
  * Callers pass typed event data; the Flow/Klaviyo fields (named exactly as in
- * extensions/shopcare-flow-* / parked/shopcare-flow-trade-in-status) and the
- * email template data are both derived from it here, so the three stay in step.
+ * extensions/shopcare-flow-* / parked/shopcare-flow-trade-in-status) are
+ * derived from it here.
  */
 
 export type Id = string | number;
@@ -38,12 +39,12 @@ interface QuoteAlertBase {
   customerEmail: string;
   /** Already formatted, e.g. "£20.00" (Rails Quotation#formatted_subtotal). */
   quoteTotal: string;
-  /** Link to the ticket in the ShopCare admin, for the staff email. */
+  /** Link to the ticket in the ShopCare admin, for staff alerts. */
   adminUrl?: string | null;
 }
 
 export interface EventData {
-  /** A storefront repair request was submitted (Repairs::IntakeSubmission). New in v2: emails only. */
+  /** A storefront repair request was submitted (Repairs::IntakeSubmission). New in v2: a staff alert. */
   repair_submitted: {
     ticketId: Id;
     productTitle: string;
@@ -57,30 +58,6 @@ export interface EventData {
   repair_status_changed: {
     ticketId: Id;
     status: RepairStatus;
-    productTitle: string;
-    customerName?: string | null;
-    statusUrl?: string | null;
-  };
-  /**
-   * The quote is paid (or £0 covered): ask the customer to post the item.
-   * The email carries the postage slip PDF (NotificationDeps.attachments).
-   * `sendNumber` is 1 for the first email and counts up on each resend, so
-   * a resend gets its own delivery while a repeat of the same one doesn't.
-   */
-  item_requested: {
-    ticketId: Id;
-    productTitle: string;
-    customerName?: string | null;
-    /** The workshop address, one line per entry. */
-    workshopAddress: string[];
-    instructions: string;
-    /** Signed, expiring storefront link to the PDF (works for guests). */
-    downloadUrl?: string | null;
-    sendNumber: number;
-  };
-  /** Staff marked the customer's parcel as arrived. */
-  item_received: {
-    ticketId: Id;
     productTitle: string;
     customerName?: string | null;
     statusUrl?: string | null;
@@ -133,42 +110,7 @@ export interface EventData {
 
 export type EventName = keyof EventData;
 
-/** The emails ShopCare can send, each with its own on/off toggle, subject and intro. */
-export const EMAIL_KINDS = [
-  "repair_received",
-  "repair_status_changed",
-  "send_item",
-  "item_received",
-  "care_welcome",
-  "care_credit_issued",
-  "care_offer",
-  "staff_repair_request",
-  "staff_quote_paid",
-  "staff_quote_declined",
-  "staff_quote_expired",
-] as const;
-
-export type EmailKind = (typeof EMAIL_KINDS)[number];
-
-/** Only this one needs marketing consent; the rest are transactional. */
-export const MARKETING_EMAILS: readonly EmailKind[] = ["care_offer"];
-
-export type Channel = "email" | "staff_email" | "flow" | "klaviyo";
-
-/**
- * The repair statuses customers are emailed about; "completed" reads as
- * "returned". awaiting_item and received have their own emails ("Send your
- * item to us" with the postage slip, "We've received your item").
- */
-export const EMAILED_REPAIR_STATUSES = {
-  assessing: "assessing",
-  in_repair: "in_repair",
-  ready: "ready",
-  completed: "returned",
-} as const satisfies Partial<Record<RepairStatus, string>>;
-
-export type EmailedRepairStatus =
-  (typeof EMAILED_REPAIR_STATUSES)[keyof typeof EMAILED_REPAIR_STATUSES];
+export type Channel = "flow" | "klaviyo";
 
 export type FlowFields = Record<string, string | number>;
 
@@ -178,10 +120,6 @@ interface EventDefinition<E extends EventName> {
   klaviyoMetric?: string;
   /** Staff alerts: the Flow trigger has no customer reference, so it fires for guests too. */
   staffAlert?: boolean;
-  customerEmail?: EmailKind;
-  staffEmail?: EmailKind;
-  /** A file the customer email carries (resolved at send time by NotificationDeps.attachments). */
-  attachment?: "postage_slip";
   /** The record the event is about; the idempotency key is `<event>:<recordKey>`. */
   recordKey(data: EventData[E]): string;
   /** Flow trigger fields / Klaviyo event properties, keyed exactly as the trigger TOML. */
@@ -206,8 +144,6 @@ function quoteBaseFields(data: QuoteAlertBase): FlowFields {
 
 export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
   repair_submitted: {
-    customerEmail: "repair_received",
-    staffEmail: "staff_repair_request",
     recordKey: (d) => `ticket_${d.ticketId}`,
     fields: (d) => ({
       "Ticket number": String(d.ticketId),
@@ -217,7 +153,6 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
   repair_status_changed: {
     flowHandle: "shopcare-repair-status",
     klaviyoMetric: "ShopCare Repair Status Changed",
-    customerEmail: "repair_status_changed",
     recordKey: (d) => `ticket_${d.ticketId}:${d.status}`,
     fields: (d) => ({
       "Ticket number": String(d.ticketId),
@@ -225,27 +160,9 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
       "Product title": d.productTitle,
     }),
   },
-  item_requested: {
-    customerEmail: "send_item",
-    attachment: "postage_slip",
-    recordKey: (d) => `ticket_${d.ticketId}:${d.sendNumber}`,
-    fields: (d) => ({
-      "Ticket number": String(d.ticketId),
-      "Product title": d.productTitle,
-    }),
-  },
-  item_received: {
-    customerEmail: "item_received",
-    recordKey: (d) => `ticket_${d.ticketId}`,
-    fields: (d) => ({
-      "Ticket number": String(d.ticketId),
-      "Product title": d.productTitle,
-    }),
-  },
   care_activated: {
     flowHandle: "shopcare-care-activated",
     klaviyoMetric: "ShopCare Care Activated",
-    customerEmail: "care_welcome",
     recordKey: (d) => `cover_${d.coverId}`,
     fields: (d) => ({
       "Care plan": d.carePlan,
@@ -256,7 +173,6 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
   care_credit_offer: {
     flowHandle: "shopcare-care-credit",
     klaviyoMetric: "ShopCare Care Credit",
-    customerEmail: "care_credit_issued",
     recordKey: (d) => `cover_${d.coverId}`,
     fields: (d) => ({
       "Care plan": d.carePlan,
@@ -269,7 +185,6 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
   care_offer: {
     flowHandle: "shopcare-care-offer",
     klaviyoMetric: "ShopCare Care Offer",
-    customerEmail: "care_offer",
     recordKey: (d) => `order_${d.orderId}`,
     fields: (d) => ({
       "Product title": d.productTitle,
@@ -283,7 +198,6 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
     flowHandle: "shopcare-quote-paid",
     klaviyoMetric: "ShopCare Quote Paid",
     staffAlert: true,
-    staffEmail: "staff_quote_paid",
     recordKey: (d) => `quotation_${d.quotationId}`,
     fields: (d) => ({ ...quoteBaseFields(d), "Order name": d.orderName }),
   },
@@ -291,7 +205,6 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
     flowHandle: "shopcare-quote-declined",
     klaviyoMetric: "ShopCare Quote Declined",
     staffAlert: true,
-    staffEmail: "staff_quote_declined",
     recordKey: (d) => `quotation_${d.quotationId}`,
     fields: (d) => ({ ...quoteBaseFields(d), Reason: d.reason }),
   },
@@ -299,7 +212,6 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
     flowHandle: "shopcare-quote-expired",
     klaviyoMetric: "ShopCare Quote Expired",
     staffAlert: true,
-    staffEmail: "staff_quote_expired",
     recordKey: (d) => `quotation_${d.quotationId}`,
     fields: (d) => ({ ...quoteBaseFields(d), "Valid until": d.validUntil }),
   },
@@ -326,19 +238,4 @@ export function eventDefinition<E extends EventName>(
   event: E,
 ): EventDefinition<E> {
   return EVENTS[event];
-}
-
-/**
- * The customer email an event sends, if any. Repair status changes only email
- * for the statuses in EMAILED_REPAIR_STATUSES.
- */
-export function customerEmailFor<E extends EventName>(
-  event: E,
-  data: EventData[E],
-): EmailKind | undefined {
-  if (event === "repair_status_changed") {
-    const status = (data as EventData["repair_status_changed"]).status;
-    if (!Object.hasOwn(EMAILED_REPAIR_STATUSES, status)) return undefined;
-  }
-  return EVENTS[event].customerEmail;
 }

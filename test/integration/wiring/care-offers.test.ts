@@ -18,7 +18,7 @@ async function shopWithPlan(notifications: Record<string, unknown> = {}) {
   const shop = await createShop({
     settings: {
       care: { add_later_url: "https://acme.example/pages/care" },
-      notifications: { emails: { care_offer: { enabled: true } }, ...notifications },
+      notifications: { flow: true, ...notifications },
     },
   });
   const plan = await createCarePlanFor(shop, { name: "2-year Care", price: 15, offerWindowDays: 30 });
@@ -112,14 +112,14 @@ describe("emitCareOffers (the care-offers job)", () => {
     expect(rows[0]).toMatchObject({
       shopId: shop.id,
       event: "care_offer",
-      channel: "email",
+      channel: "flow",
       idempotencyKey: "care_offer:order_5001",
       status: "pending",
     });
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it("emits nothing while the merchant hasn't turned the email on (and Flow is off)", async () => {
+  it("emits nothing while Flow is off and Klaviyo isn't connected", async () => {
     const shop = await createShop();
     const plan = await createCarePlanFor(shop, { offerWindowDays: 30 });
     await orderItem(shop, plan.id);

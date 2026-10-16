@@ -1,9 +1,8 @@
 /**
- * One customer or staff notification sent to one channel, kept so merchants
- * can see what went out and what failed, and (v2) as the idempotency record:
- * a unique (shop, channel, idempotencyKey) stops duplicates. Port of
- * NotificationDelivery; v2 adds the "email" channel (docs/PORTING.md >
- * Notifications). The notification service reads and writes these rows
+ * One event sent to one integration (Shopify Flow or Klaviyo), kept so
+ * merchants can see what went out and what failed, and (v2) as the
+ * idempotency record: a unique (shop, channel, idempotencyKey) stops
+ * duplicates. Port of NotificationDelivery (docs/PORTING.md > Notifications). The notification service reads and writes these rows
  * through PrismaNotificationStore (app/services/notifications/prisma-store.server.ts).
  */
 import type { NotificationDelivery, Prisma } from "@prisma/client";
@@ -11,7 +10,7 @@ import prisma from "../db.server";
 import type { Db } from "../lib/db-lock.server";
 import { assertValid, Errors, validateInclusion, validatePresence } from "./validation.server";
 
-export const CHANNELS = ["flow", "klaviyo", "email", "staff_email"] as const;
+export const CHANNELS = ["flow", "klaviyo"] as const;
 export type NotificationChannel = (typeof CHANNELS)[number];
 export const DELIVERY_STATUSES = ["pending", "sent", "skipped", "failed"] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];

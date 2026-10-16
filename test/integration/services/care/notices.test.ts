@@ -14,7 +14,7 @@ import { dbNotifyDeps } from "../../../support/quotes";
 describe("notifyCareActivated", () => {
   it("an order with Care confirms it, once per cover", async () => {
     dbNotifyDeps();
-    const shop = await createShop({ shopifyDomain: "notices.myshopify.com" });
+    const shop = await createShop({ shopifyDomain: "notices.myshopify.com", settings: { notifications: { flow: true } } });
     await buildCare(shop);
     const recorder = new ItemRecorder(shop);
     await recorder.record(
@@ -26,7 +26,7 @@ describe("notifyCareActivated", () => {
     await notifyCareActivated(shop, covers); // duplicate webhook
 
     const deliveries = await prisma.notificationDelivery.findMany({ where: { event: "care_activated" } });
-    expect(deliveries.map((d) => d.channel)).toEqual(["email"]);
+    expect(deliveries.map((d) => d.channel)).toEqual(["flow"]);
     const data = (deliveries[0].payload as { data: Record<string, unknown> }).data;
     expect([data.carePlan, data.productTitle, data.coverEnds]).toEqual([
       "2-year Care",

@@ -1,18 +1,16 @@
 /**
- * Postage slips: the ticket waits for the customer's item, they're emailed a
- * slip (once), staff can resend it and mark the parcel received.
+ * Postage slips: the ticket waits for the customer's item (the slip link went
+ * out in Shopify's order confirmation; ShopCare sends no email), staff mark
+ * the parcel received.
  */
 import type { RepairTicket, Shop } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "../../../../app/db.server";
 import { MemoryStorage } from "../../../../app/lib/storage.server";
-import { deliverNotification, setNotificationDeps } from "../../../../app/services/notifications.server";
-import { setEmailAdapter } from "../../../../app/services/email.server";
+import { setNotificationDeps } from "../../../../app/services/notifications.server";
 import { processRepairPayment } from "../../../../app/services/payments/repair-payment.server";
-import { resendPostageEmail } from "../../../../app/services/repairs/item-postage.server";
 import {
   ensurePostageSlip,
-  postageSlipAttachments,
   postageSlipKey,
   postageSlipLink,
   verifyPostageSlipLink,
@@ -40,8 +38,6 @@ describe("postage slips", () => {
   let storage: MemoryStorage;
 
   const reload = () => prisma.repairTicket.findUniqueOrThrow({ where: { id: ticket.id } });
-  const deliveries = (event: string) =>
-    prisma.notificationDelivery.findMany({ where: { event }, orderBy: { id: "asc" } });
 
   async function payQuote(t = ticket) {
     const quotation = await createQuotationFor(t.id, { status: "sent", sentAt: new Date() });
@@ -52,12 +48,6 @@ describe("postage slips", () => {
       { id: 555, name: "#1042", tags: "repair", total_price: "24.00", currency: "GBP", note_attributes: [{ name: "repair_quotation_id", value: String(quotation.id) }] },
       { client: api.client, enqueue: outbound.enqueue },
     );
-  }
-
-  /** Runs every queued delivery with the production attachment resolver (memory storage). */
-  async function deliverQueued() {
-    const deps = { ...notifications.deps, attachments: (d: Parameters<typeof postageSlipAttachments>[0]) => postageSlipAttachments(d, { storage }) };
-    for (const id of notifications.enqueued.splice(0)) await deliverNotification(id, deps);
   }
 
   beforeEach(async () => {
@@ -81,93 +71,32 @@ describe("postage slips", () => {
   });
   afterEach(() => {
     setNotificationDeps(undefined);
-    setEmailAdapter(undefined);
   });
 
-  it("a paid quote asks for the item: one email with the slip attached, however often it's triggered", async () => {
+  it("a paid quote waits for the item; no email from ShopCare and nothing logged as emailed", async () => {
     expect(await payQuote()).toBe("ok");
     expect((await reload()).status).toBe("awaiting_item");
-    const [requested] = await deliveries("item_requested");
-    expect([requested.channel, requested.idempotencyKey]).toEqual(["email", `item_requested:ticket_${ticket.id}:1`]);
-    const data = (requested.payload as { data: Record<string, unknown> }).data;
-    expect(data).toMatchObject({
-      ticketId: ticket.id,
-      workshopAddress: ["Acme Repairs", "4 Cobbler's Yard", "Northampton NN1 1AA", "United Kingdom"],
-      instructions: "Use a tracked service.",
-      sendNumber: 1,
-    });
-    expect(String(data.downloadUrl)).toMatch(
-      new RegExp(`^https://${domain}/apps/repairs/tickets/${ticket.id}/postage-slip\\?expires=\\d+&token=[0-9a-f]{64}$`),
-    );
-
-    // Back to awaiting_item later (staff moved it around): no second email.
-    await changeTicketStatus({ shopId: shop.id, ticketId: ticket.id, to: "assessing", actor: "staff", client: api.client, enqueue: outbound.enqueue });
-    await changeTicketStatus({ shopId: shop.id, ticketId: ticket.id, to: "awaiting_item", actor: "staff", client: api.client, enqueue: outbound.enqueue });
-    expect(await deliveries("item_requested")).toHaveLength(1);
-
-    await deliverQueued();
-    const sent = notifications.email.sent.filter((m) => m.tags?.email === "send_item");
-    expect(sent).toHaveLength(1);
-    expect(sent[0].subject).toBe(`Send your Chelsea Boot to us (repair #${ticket.id})`);
-    expect(sent[0].attachments).toHaveLength(1);
-    expect(sent[0].attachments![0]).toMatchObject({ filename: `repair-${ticket.id}-postage-slip.pdf`, contentType: "application/pdf" });
-    expect(Buffer.from(sent[0].attachments![0].content.slice(0, 5)).toString()).toBe("%PDF-");
-    // The slip is stored against the ticket.
-    expect((await reload()).postageSlipKey).toBe(postageSlipKey(shop.id, ticket.id));
-    expect(await storage.get(postageSlipKey(shop.id, ticket.id))).not.toBeNull();
-    const activity = await prisma.ticketActivity.findFirst({ where: { repairTicketId: ticket.id, body: { startsWith: "Postage slip emailed" } } });
-    expect(activity).not.toBeNull();
+    expect(await prisma.notificationDelivery.count()).toBe(0);
+    expect(
+      await prisma.ticketActivity.count({ where: { repairTicketId: ticket.id, body: { contains: "emailed" } } }),
+    ).toBe(0);
   });
 
-  it("guests get the email too", async () => {
-    await prisma.repairTicket.update({ where: { id: ticket.id }, data: { shopifyCustomerId: null } });
-    await payQuote();
-    expect((await deliveries("item_requested")).map((d) => d.channel)).toEqual(["email"]);
-  });
-
-  it("without a workshop address nothing is sent and the ticket says why; a resend works once it's added", async () => {
+  it("without a workshop address no slip can be made", async () => {
     shop = await prisma.shop.update({ where: { id: shop.id }, data: { settings: {} } });
     await payQuote();
     expect((await reload()).status).toBe("awaiting_item");
-    expect(await deliveries("item_requested")).toHaveLength(0);
-    const note = await prisma.ticketActivity.findFirstOrThrow({ where: { repairTicketId: ticket.id, body: { startsWith: "Postage slip not sent" } } });
-    expect(note.body).toMatch(/Settings → Repairs/);
-    expect(await resendPostageEmail(shop, ticket.id)).toEqual({ ok: false, error: expect.stringMatching(/workshop address/) });
     await expect(ensurePostageSlip(shop, ticket.id, { storage })).rejects.toThrow(/workshop address/);
-
-    shop = await prisma.shop.update({ where: { id: shop.id }, data: { settings: { ...WORKSHOP_SETTINGS } } });
-    expect(await resendPostageEmail(shop, ticket.id)).toMatchObject({ ok: true });
-    expect((await deliveries("item_requested")).map((d) => d.idempotencyKey)).toEqual([`item_requested:ticket_${ticket.id}:1`]);
   });
 
-  it("Resend postage email queues a new email each time", async () => {
-    await payQuote();
-    expect(await resendPostageEmail(shop, ticket.id)).toEqual({ ok: true, message: "Postage email sent again to sarah@example.com." });
-    await resendPostageEmail(shop, ticket.id);
-    expect((await deliveries("item_requested")).map((d) => d.idempotencyKey)).toEqual([
-      `item_requested:ticket_${ticket.id}:1`,
-      `item_requested:ticket_${ticket.id}:2`,
-      `item_requested:ticket_${ticket.id}:3`,
-    ]);
-    await deliverQueued();
-    expect(notifications.email.sent.filter((m) => m.tags?.email === "send_item")).toHaveLength(3);
-  });
-
-  it("Resend postage email only for a ticket awaiting its item", async () => {
-    expect(await resendPostageEmail(shop, ticket.id)).toEqual({ ok: false, error: expect.stringMatching(/awaiting/) });
-    const other = await createShop();
-    expect(await resendPostageEmail(other, ticket.id)).toEqual({ ok: false, error: "Ticket not found." });
-  });
-
-  it("Mark received moves an awaiting ticket to received and tells the customer, once", async () => {
+  it("Mark received moves an awaiting ticket to received, once", async () => {
     await payQuote();
     const result = await markItemReceived({ shopId: shop.id, ticketId: ticket.id, actor: "staff", client: api.client, enqueue: outbound.enqueue });
-    expect(result).toEqual({ ok: true, message: "Item marked as received. The customer has been told." });
+    expect(result).toEqual({ ok: true, message: "Item marked as received." });
     const t = await reload();
     expect([t.status, t.itemReceivedAt !== null]).toEqual(["received", true]);
     const activity = await prisma.ticketActivity.findFirstOrThrow({ where: { repairTicketId: ticket.id, activityType: "status_change" }, orderBy: { id: "desc" } });
     expect(activity.body).toBe("Status changed from awaiting_item to received.");
-    expect((await deliveries("item_received")).map((d) => [d.channel, d.idempotencyKey])).toEqual([["email", `item_received:ticket_${ticket.id}`]]);
 
     expect(await markItemReceived({ shopId: shop.id, ticketId: ticket.id, actor: "staff" })).toEqual({
       ok: false,
@@ -175,8 +104,6 @@ describe("postage slips", () => {
     });
     // Staff carry on: received → in_repair.
     expect(await changeTicketStatus({ shopId: shop.id, ticketId: ticket.id, to: "in_repair", actor: "staff", client: api.client, enqueue: outbound.enqueue })).toMatchObject({ ok: true, changed: true });
-    await deliverQueued();
-    expect(notifications.email.sent.filter((m) => m.tags?.email === "item_received")).toHaveLength(1);
   });
 
   it("an item that arrives before it's quoted keeps its status; paying then starts the repair", async () => {
@@ -184,19 +111,16 @@ describe("postage slips", () => {
     expect(await markItemReceived({ shopId: shop.id, ticketId: ticket.id, actor: "staff" })).toMatchObject({ ok: true });
     expect((await reload()).status).toBe("assessing");
     expect(await prisma.ticketActivity.count({ where: { repairTicketId: ticket.id, body: "Item received at the workshop." } })).toBe(1);
-    expect(await deliveries("item_received")).toHaveLength(1);
 
     await prisma.repairTicket.update({ where: { id: ticket.id }, data: { status: "quoted" } });
     await payQuote();
     expect((await reload()).status).toBe("in_repair");
-    expect(await deliveries("item_requested")).toHaveLength(0);
   });
 
   it("choosing Received from the status menu records the arrival too", async () => {
     await payQuote();
     await changeTicketStatus({ shopId: shop.id, ticketId: ticket.id, to: "received", actor: "staff", client: api.client, enqueue: outbound.enqueue });
     expect((await reload()).itemReceivedAt).not.toBeNull();
-    expect(await deliveries("item_received")).toHaveLength(1);
   });
 
   it("won't mark a closed ticket received", async () => {

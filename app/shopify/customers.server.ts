@@ -1,10 +1,6 @@
 /**
  * Customer reads and writes:
  *
- * - Email marketing consent, checked before ShopCare sends a marketing email
- *   ("Add Care to your purchase"; docs/PORTING.md → Marketing consent). Only
- *   `SUBSCRIBED` may be sent to. Uses `defaultEmailAddress`, which replaces the
- *   deprecated `emailMarketingConsent` in 2026-10.
  * - The `repairs.requested_products` JSON metafield the storefront reads to
  *   show repair status (Rails `AdminApi#update_repair_status`). Rails used REST
  *   `GET/POST customers/:id/metafields`; this reads `customer.metafield` and
@@ -17,15 +13,6 @@ import {
   type AdminGraphqlClient,
   type UserError,
 } from "./graphql.server";
-
-export const CUSTOMER_MARKETING_CONSENT_QUERY = `#graphql
-  query CustomerMarketingConsent($id: ID!) {
-    customer(id: $id) {
-      id
-      defaultEmailAddress { emailAddress marketingState marketingUpdatedAt }
-    }
-  }
-`;
 
 export const CUSTOMER_METAFIELD_QUERY = `#graphql
   query CustomerMetafield($id: ID!, $namespace: String!, $key: String!) {
@@ -44,45 +31,6 @@ export const METAFIELDS_SET_MUTATION = `#graphql
     }
   }
 `;
-
-export type EmailMarketingState =
-  "INVALID" | "NOT_SUBSCRIBED" | "PENDING" | "SUBSCRIBED" | "UNSUBSCRIBED";
-
-export interface EmailMarketingConsent {
-  email: string | null;
-  /** null when the customer has no email address. */
-  state: EmailMarketingState | null;
-  updatedAt: string | null;
-  /** True only for SUBSCRIBED: the one state a marketing email may go to. */
-  subscribed: boolean;
-}
-
-/** The customer's consent, or null when Shopify doesn't know the customer. */
-export async function fetchEmailMarketingConsent(
-  client: AdminGraphqlClient,
-  customerId: string,
-): Promise<EmailMarketingConsent | null> {
-  const data = await adminGraphql<{
-    customer: {
-      id: string;
-      defaultEmailAddress: {
-        emailAddress: string;
-        marketingState: EmailMarketingState;
-        marketingUpdatedAt: string | null;
-      } | null;
-    } | null;
-  }>(client, CUSTOMER_MARKETING_CONSENT_QUERY, {
-    id: buildGid("Customer", customerId),
-  });
-  if (!data.customer) return null;
-  const address = data.customer.defaultEmailAddress;
-  return {
-    email: address?.emailAddress ?? null,
-    state: address?.marketingState ?? null,
-    updatedAt: address?.marketingUpdatedAt ?? null,
-    subscribed: address?.marketingState === "SUBSCRIBED",
-  };
-}
 
 export const REPAIR_STATUS_NAMESPACE = "repairs";
 export const REPAIR_STATUS_KEY = "requested_products";
@@ -164,42 +112,4 @@ export async function updateRepairStatus(
     updated,
   );
   return updated;
-}
-
-export const EMAIL_MARKETING_CONSENT_UPDATE_MUTATION = `#graphql
-  mutation CustomerEmailMarketingConsentUpdate($input: CustomerEmailMarketingConsentUpdateInput!) {
-    customerEmailMarketingConsentUpdate(input: $input) {
-      customer { id }
-      userErrors { field message }
-    }
-  }
-`;
-
-/**
- * Records in Shopify that the customer unsubscribed from email marketing
- * (ShopCare's unsubscribe link), so the store and ShopCare agree. Admin API
- * 2026-10: `customerEmailMarketingConsentUpdate(input: { customerId,
- * emailMarketingConsent: { marketingState: UNSUBSCRIBED, consentUpdatedAt } })`;
- * only SUBSCRIBED / UNSUBSCRIBED / PENDING can be set. Needs `write_customers`.
- */
-export async function unsubscribeFromEmailMarketing(
-  client: AdminGraphqlClient,
-  customerId: string,
-  at: Date = new Date(),
-): Promise<void> {
-  const data = await adminGraphql<{
-    customerEmailMarketingConsentUpdate: { userErrors: UserError[] };
-  }>(client, EMAIL_MARKETING_CONSENT_UPDATE_MUTATION, {
-    input: {
-      customerId: buildGid("Customer", customerId),
-      emailMarketingConsent: {
-        marketingState: "UNSUBSCRIBED",
-        consentUpdatedAt: at.toISOString(),
-      },
-    },
-  });
-  assertNoUserErrors(
-    "customerEmailMarketingConsentUpdate",
-    data.customerEmailMarketingConsentUpdate,
-  );
 }

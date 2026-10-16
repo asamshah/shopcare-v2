@@ -25,13 +25,13 @@ describe("changeTicketStatus", () => {
   beforeEach(async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     notifications = dbNotifyDeps();
-    shop = await createShop({ shopifyDomain: "ts-test.myshopify.com", settings: { webhook_url: "https://hooks.example/x" } });
+    shop = await createShop({ shopifyDomain: "ts-test.myshopify.com", settings: { webhook_url: "https://hooks.example/x", notifications: { flow: true } } });
     ticket = await createRepairTicketFor(shop, { customerEmail: "c@example.com", productTitle: "Boot", status: "in_repair" });
     api = new FakeDraftOrders();
     outbound = captureEnqueue();
   });
 
-  it("logs the change, sends the outbound webhook and emails the customer", async () => {
+  it("logs the change, sends the outbound webhook and fires the Flow trigger", async () => {
     expect(await change("ready", "Polished too.")).toEqual({ ok: true, changed: true, message: "Status updated to ready." });
     expect((await prisma.repairTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("ready");
     const activity = await prisma.ticketActivity.findFirstOrThrow({ where: { repairTicketId: ticket.id } });
@@ -40,7 +40,7 @@ describe("changeTicketStatus", () => {
     ]);
     expect(outbound.jobs.map((j) => [j.payload.event, j.payload.detail])).toEqual([["status_change", "ready"]]);
     const delivery = await prisma.notificationDelivery.findFirstOrThrow({ where: { event: "repair_status_changed" } });
-    expect([delivery.channel, delivery.idempotencyKey]).toEqual(["email", `repair_status_changed:ticket_${ticket.id}:ready`]);
+    expect([delivery.channel, delivery.idempotencyKey]).toEqual(["flow", `repair_status_changed:ticket_${ticket.id}:ready`]);
     expect(notifications.enqueued).toEqual([String(delivery.id)]);
   });
 

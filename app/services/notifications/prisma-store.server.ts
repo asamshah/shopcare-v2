@@ -38,7 +38,6 @@ function toDelivery(row: Row): NotificationDelivery {
     payload: row.payload as unknown as DeliveryPayload,
     attempts: row.attempts,
     error: row.error,
-    providerMessageId: row.providerMessageId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -100,12 +99,8 @@ export class PrismaNotificationStore implements NotificationStore {
     return row ? toDelivery(row) : null;
   }
 
-  async markSent(id: string, providerMessageId?: string | null) {
-    await this.update(id, {
-      status: "sent",
-      error: null,
-      providerMessageId: providerMessageId ?? null,
-    });
+  async markSent(id: string) {
+    await this.update(id, { status: "sent", error: null });
   }
 
   async markSkipped(id: string, reason: string) {

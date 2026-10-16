@@ -2,13 +2,12 @@
  * "Add Care to your purchase" (the `care_offer` notification), v2 timing.
  *
  * Rails emitted it straight after the order (Care::Notices#offer) and left
- * the delay to the merchant's Flow/Klaviyo. In v2 ShopCare sends the email
- * itself, so the delay is ours: a daily job (netlify/functions/
- * daily-care-offers.mts → "care-offers" job) emits it `care_offer_delay_days`
- * (default 7) after purchase. Consent is not checked here: it's marketing, so
- * the notification job checks Shopify's marketing consent at send time and
- * skips guests and non-subscribers. Flow/Klaviyo (when enabled) get the event
- * at the same moment.
+ * the delay to the merchant's Flow/Klaviyo. In v2 the delay is ours: a daily
+ * job (netlify/functions/daily-care-offers.mts → "care-offers" job) emits it
+ * `care_offer_delay_days` (default 7) after purchase. ShopCare never emails
+ * it: it's marketing, so it goes out only if the merchant wires the Flow
+ * trigger to Shopify Email's "Send marketing email" (which only sends to
+ * customers subscribed to email marketing) or builds a Klaviyo flow on it.
  *
  * One offer per order, as in Rails: the first item that can still have Care
  * added names the plan; every offered item's title is listed. Orders whose

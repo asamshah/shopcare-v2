@@ -16,8 +16,7 @@
  *   notification log     payloads addressed to the customer (pending ones are
  *                        skipped so nothing is sent afterwards)
  *
- * The email suppression list keeps only address digests, so an opt-out
- * survives the redaction. Idempotent: running it again finds nothing left to
+ * Idempotent: running it again finds nothing left to
  * strip (stored-file deletes ignore missing files).
  */
 import type { Prisma } from "@prisma/client";

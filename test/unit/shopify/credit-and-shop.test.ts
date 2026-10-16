@@ -4,7 +4,6 @@
  * Flow triggers, shop info and marketing consent.
  */
 import { describe, expect, it } from "vitest";
-import { fetchEmailMarketingConsent } from "../../../app/shopify/customers.server";
 import {
   createDiscountCode,
   generateDiscountCode,
@@ -334,53 +333,3 @@ describe("shop info", () => {
   });
 });
 
-describe("fetchEmailMarketingConsent", () => {
-  const consent = (marketingState: string | null) =>
-    new FakeGraphql({
-      "customer(id:": {
-        customer: {
-          id: "gid://shopify/Customer/5",
-          defaultEmailAddress: marketingState
-            ? {
-                emailAddress: "s@example.com",
-                marketingState,
-                marketingUpdatedAt: "2026-01-01T00:00:00Z",
-              }
-            : null,
-        },
-      },
-    });
-
-  it("only SUBSCRIBED may be sent marketing", async () => {
-    const subscribed = await fetchEmailMarketingConsent(
-      consent("SUBSCRIBED"),
-      "5",
-    );
-    expect(subscribed).toEqual({
-      email: "s@example.com",
-      state: "SUBSCRIBED",
-      updatedAt: "2026-01-01T00:00:00Z",
-      subscribed: true,
-    });
-    for (const state of [
-      "NOT_SUBSCRIBED",
-      "PENDING",
-      "UNSUBSCRIBED",
-      "INVALID",
-    ]) {
-      expect(
-        (await fetchEmailMarketingConsent(consent(state), "5"))?.subscribed,
-      ).toBe(false);
-    }
-    expect(await fetchEmailMarketingConsent(consent(null), "5")).toMatchObject({
-      email: null,
-      subscribed: false,
-    });
-  });
-
-  it("is null for an unknown customer", async () => {
-    const api = new FakeGraphql({ "customer(id:": { customer: null } });
-    expect(await fetchEmailMarketingConsent(api, "5")).toBeNull();
-    expect(api.calls[0].variables.id).toBe("gid://shopify/Customer/5");
-  });
-});

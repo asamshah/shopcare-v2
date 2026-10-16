@@ -261,7 +261,7 @@ export function createNotificationDeliveryFor(
   shop: Shop,
   overrides: Partial<Prisma.NotificationDeliveryUncheckedCreateInput> = {},
 ) {
-  return createNotificationDelivery({ shopId: shop.id, event: "repair_status_changed", channel: "email", ...overrides });
+  return createNotificationDelivery({ shopId: shop.id, event: "repair_status_changed", channel: "flow", ...overrides });
 }
 
 export function createProcessedRefundFor(

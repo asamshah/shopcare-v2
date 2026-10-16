@@ -4,7 +4,8 @@
  *
  * Paying a quote's invoice is accepting it: the quote goes from sent to paid
  * in one step (counting the cover's claim), the ticket moves to
- * awaiting_item (the customer is emailed a postage slip) or, when the workshop
+ * awaiting_item (Shopify's order confirmation gave the customer the postage
+ * slip link, from the order's attributes) or, when the workshop
  * already has the item, straight to in_repair; the payment is logged, staff are alerted (quote_paid), the customer's
  * storefront status metafield is synced and the `payment` outbound webhook
  * sent. A payment for a cancelled ticket doesn't reopen it: it's flagged for

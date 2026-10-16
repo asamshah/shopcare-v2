@@ -7,15 +7,17 @@
  * (Rails: staff can advance or override the pipeline freely), then:
  *   - logs a status_change activity
  *   - sends the `status_change` outbound webhook
- *   - emits `repair_status_changed` (customer email / Flow / Klaviyo)
+ *   - emits `repair_status_changed` (Flow / Klaviyo, when connected)
  *   - on "completed", when the workshop (parts) is on, takes the repair's
  *     parts out of stock and records its costs (consumeTicketParts)
  *   - on "cancelled", cancels the ticket's open quote and deletes its draft
  *     order (cancelOpenQuotesForTicket)
- *   - on "awaiting_item", emails the customer their postage slip (once per
- *     ticket; requestItemByPost, from notifyRepairStatusChanged)
- *   - on "received", records when the item arrived and sends "We've
- *     received your item" (markItemReceived does the same from any status)
+ *   - on "received", records when the item arrived (markItemReceived does
+ *     the same from any status)
+ *
+ * Customers aren't emailed about status changes (Shopify has no such
+ * email): the storefront Repair status block shows where the repair is, and
+ * the postage slip went out in Shopify's Order confirmation.
  *
  * The status is written under the ticket's row lock, so two staff changing it
  * at once each see the other's result.
@@ -37,7 +39,6 @@ import type { RepairStatus } from "../notifications/events.server";
 import { notify, type NotifyOptions } from "../notifications/notify.server";
 import { consumeTicketParts } from "../parts/consumer.server";
 import { cancelOpenQuotesForTicket } from "../quotes/cancel.server";
-import { notifyItemReceived, requestItemByPost } from "./item-postage.server";
 import {
   authorFor,
   clientFor,
@@ -48,10 +49,7 @@ import {
   type ServiceOptions,
 } from "../quotes/common.server";
 
-/**
- * Rails after_update_commit: tell the customer their repair moved along, and
- * on awaiting_item send them the postage slip.
- */
+/** Rails after_update_commit: the repair_status_changed event (Flow / Klaviyo). */
 export async function notifyRepairStatusChanged(
   shop: Pick<Shop, "id" | "shopifyDomain" | "settings">,
   ticket: Pick<
@@ -60,13 +58,6 @@ export async function notifyRepairStatusChanged(
   >,
   options?: NotifyOptions,
 ): Promise<void> {
-  if (ticket.status === "awaiting_item") {
-    try {
-      await requestItemByPost(shop, ticket, options);
-    } catch (error) {
-      (options?.logger ?? console).error(`[ticket-status] postage email for ticket=${ticket.id} failed`, error);
-    }
-  }
   if (!repairStatusChangedEvent(ticket)) return;
   await notify(
     shop.shopifyDomain,
@@ -154,8 +145,6 @@ export async function changeTicketStatus({
     db,
     deps: options.notifyDeps,
   });
-  if (outcome.received)
-    await notifyItemReceived(shop, outcome.ticket, { db, deps: options.notifyDeps });
 
   let message = `Status updated to ${humanStatus(to)}.`;
   if (to === "completed" && partsEnabled(shop)) {
@@ -198,7 +187,7 @@ export interface MarkReceivedInput extends ServiceOptions {
  * awaiting its item moves to received (status change, webhook, Flow); one
  * that arrived before it was quoted (new / assessing / quoted) keeps its
  * status, so a later payment goes straight to in_repair. Either way the
- * arrival is logged and the customer gets "We've received your item".
+ * arrival is logged (the storefront Repair status block shows it).
  */
 export async function markItemReceived({
   shopId,
@@ -215,7 +204,7 @@ export async function markItemReceived({
 
   if (found.status === "awaiting_item") {
     const result = await changeTicketStatus({ shopId, ticketId, to: "received", actor, db, ...options });
-    return result.ok ? { ok: true, message: "Item marked as received. The customer has been told." } : result;
+    return result.ok ? { ok: true, message: "Item marked as received." } : result;
   }
 
   const marked = await withLock(db, "repair_tickets", ticketId, async (tx) => {
@@ -237,6 +226,5 @@ export async function markItemReceived({
     return updated;
   });
   if (!marked) return { ok: false, error: "This item is already marked as received." };
-  await notifyItemReceived(found.shop, marked, { db, deps: options.notifyDeps });
-  return { ok: true, message: "Item marked as received. The customer has been told." };
+  return { ok: true, message: "Item marked as received." };
 }

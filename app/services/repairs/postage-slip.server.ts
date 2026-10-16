@@ -7,8 +7,8 @@
  * (workshop address, posting instructions, store name, customer, product,
  * quote lines, layout version). `ensurePostageSlip` returns the stored file
  * while the digest still matches and redraws it when anything changed, so
- * the email attachment, the storefront download and the admin download are
- * the same file and change together.
+ * the customer's download and the admin download are the same file and
+ * change together.
  *
  * Download links: the email and the storefront Repair status block link to
  * the App Proxy route `/apps/repairs/tickets/:id/postage-slip`. The email's
@@ -35,13 +35,10 @@ import {
 } from "../../models/shop.server";
 import { jsonObject } from "../../models/validation.server";
 import { storeNameFromDomain } from "../../shopify/shop.server";
-import type { EmailAttachment } from "../email.server";
-import { DeliveryError } from "../notifications/delivery-error.server";
-import type { NotificationDelivery } from "../notifications/store.server";
 
 /** Bump when the layout changes, so stored slips are redrawn. */
 export const POSTAGE_SLIP_VERSION = 1;
-/** How long the emailed download link works. */
+/** How long the order confirmation's link works after the quote expires. */
 export const POSTAGE_LINK_DAYS = 30;
 /** How long the Repair status block's link works (the page is per visit). */
 export const STATUS_LINK_HOURS = 24;
@@ -198,7 +195,7 @@ function signedQuery(shopDomain: string, ticketId: number, expiresAt: Date): str
   return `expires=${expires}&token=${linkSignature(shopDomain, ticketId, expires)}`;
 }
 
-/** The emailed link: the storefront's App Proxy URL, signed, expiring after `days`. */
+/** The order confirmation's link: the storefront's App Proxy URL, signed, expiring after `days`. */
 export function postageSlipLink(
   shop: Pick<Shop, "shopifyDomain" | "settings">,
   ticketId: number,
@@ -233,32 +230,4 @@ export function verifyPostageSlipLink(
   if (!Number.isInteger(expires) || !token) return "invalid";
   if (!safeEqualHex(token, linkSignature(shopDomain, ticketId, expires))) return "invalid";
   return expires * 1000 < now.getTime() ? "expired" : "valid";
-}
-
-// --- The email attachment ---------------------------------------------------------
-
-/**
- * NotificationDeps.attachments for production: the postage slip for an
- * item_requested email. A missing workshop address or ticket is permanent.
- */
-export async function postageSlipAttachments(
-  delivery: Pick<NotificationDelivery, "event" | "shopId" | "payload">,
-  options: PostageSlipOptions = {},
-): Promise<EmailAttachment[]> {
-  if (delivery.event !== "item_requested") return [];
-  const db = options.db ?? prisma;
-  const ticketId = Number((delivery.payload.data as { ticketId?: unknown }).ticketId);
-  const shop = await db.shop.findUnique({ where: { shopifyDomain: delivery.shopId } });
-  const ticket =
-    shop && Number.isInteger(ticketId)
-      ? await db.repairTicket.findFirst({ where: { id: ticketId, shopId: shop.id }, select: { id: true } })
-      : null;
-  if (!shop || !ticket) throw new DeliveryError("The repair ticket is gone", false);
-  try {
-    const file = await ensurePostageSlip(shop, ticket.id, options);
-    return [{ filename: file.filename, content: file.content, contentType: "application/pdf" }];
-  } catch (error) {
-    if (error instanceof MissingWorkshopAddressError) throw new DeliveryError(error.message, false);
-    throw error;
-  }
 }

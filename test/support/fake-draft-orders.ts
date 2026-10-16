@@ -44,6 +44,19 @@ export class FakeDraftOrders {
       },
       "metafield(namespace": { customer: { id: "gid://shopify/Customer/77", metafield: null } },
       "metafieldsSet(": { metafieldsSet: { metafields: [], userErrors: [] } },
+      // "Mark returned" (fulfillments.server.ts): order 5001 has one open fulfillment order.
+      "fulfillmentOrders(": {
+        order: {
+          id: "gid://shopify/Order/5001",
+          name: "#5001",
+          fulfillmentOrders: {
+            nodes: [{ id: "gid://shopify/FulfillmentOrder/70", status: "OPEN", supportedActions: [{ action: "CREATE_FULFILLMENT" }] }],
+          },
+        },
+      },
+      "fulfillmentCreate(": {
+        fulfillmentCreate: { fulfillment: { id: "gid://shopify/Fulfillment/88", status: "SUCCESS" }, userErrors: [] },
+      },
     });
   }
 
@@ -62,6 +75,7 @@ export class FakeDraftOrders {
         ["draftOrderComplete(", "complete"],
         ["draftOrderDelete(", "delete"],
         ["metafieldsSet(", "metafield"],
+        ["fulfillmentCreate(", "fulfil"],
       ].find(([fragment]) => query.includes(fragment))?.[1];
       return kind ? [[kind, variables] as DraftCall] : [];
     });

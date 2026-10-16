@@ -22,13 +22,13 @@ describe("handleCareRefund", () => {
   const usage = async () =>
     ((await prisma.cover.findUniqueOrThrow({ where: { id: cover.id } })).usage as { refund: Record<string, string> }).refund;
   const setCare = async (care: Record<string, string>) => {
-    shop = await prisma.shop.update({ where: { id: shop.id }, data: { settings: { care } } });
+    shop = await prisma.shop.update({ where: { id: shop.id }, data: { settings: { care, notifications: { flow: true } } } });
   };
 
   beforeEach(async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     dbNotifyDeps();
-    shop = await createShop({ shopifyDomain: "carerefund-test.myshopify.com" });
+    shop = await createShop({ shopifyDomain: "carerefund-test.myshopify.com", settings: { notifications: { flow: true } } });
     plan = (await buildCare(shop)).plan;
     item = await createItemFor(shop, {
       shopifyCustomerId: "77",
@@ -77,7 +77,7 @@ describe("handleCareRefund", () => {
     expect(await usage()).toMatchObject({ action: "refund", status: "done", refund_id: "gid://shopify/Refund/9" });
   });
 
-  it("or issues a credit code for Care products and tells the customer", async () => {
+  it("or issues a credit code for Care products (Flow trigger for merchants who email it)", async () => {
     await setCare({ refund_action: "credit", credit_days: "30" });
     await handle();
     const credit = await prisma.careCredit.findFirstOrThrow({ where: { shopId: shop.id } });

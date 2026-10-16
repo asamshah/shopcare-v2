@@ -5,8 +5,7 @@ import {
 } from "../services/notifications.server";
 
 /**
- * Sends one notification delivery (email, staff email, Flow trigger or
- * Klaviyo event). Ported from Rails NotificationJob. Enqueued by
+ * Sends one notification delivery (a Flow trigger or a Klaviyo event). Ported from Rails NotificationJob. Enqueued by
  * `emitNotification()` with `{ deliveryId }`; a retryable failure throws so the
  * background function retries it (attempts are counted on the delivery).
  */

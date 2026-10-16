@@ -17,9 +17,9 @@ import { action as customersRedact } from "../../../app/routes/webhooks.customer
 import { action as ordersPaid } from "../../../app/routes/webhooks.orders.paid";
 import { action as refundsCreate } from "../../../app/routes/webhooks.refunds.create";
 import { addLineItem } from "../../../app/services/admin/tickets.server";
-import type { EmailMessage } from "../../../app/services/email.server";
 import { sendQuote } from "../../../app/services/quotes/send.server";
 import { changeTicketStatus, markItemReceived } from "../../../app/services/repairs/ticket-status.server";
+import { returnRepairedItem } from "../../../app/services/repairs/return-item.server";
 import { buildCare, buildWorkshop, WORKSHOP_SETTINGS } from "../../support/factories";
 import { FakeDraftOrders } from "../../support/fake-draft-orders";
 import { FakeGraphql } from "../../support/fake-graphql";
@@ -65,7 +65,6 @@ describe("end-to-end scenarios", () => {
   let api: FakeDraftOrders;
   let storage: MemoryStorage;
   let notify: ReturnType<typeof dbNotifyDeps>;
-  let sent: EmailMessage[];
   const outbound: unknown[] = [];
 
   beforeEach(async () => {
@@ -75,10 +74,9 @@ describe("end-to-end scenarios", () => {
     notify = dbNotifyDeps();
     storage = new MemoryStorage();
     api = new FakeDraftOrders();
-    sent = [];
     outbound.length = 0;
     shop = await installedShop(domain, {
-      settings: { currency: "GBP", notifications: { staff_email: "workshop@e2e.test" } },
+      settings: { currency: "GBP", notifications: { flow: true } },
     });
     storefront = fakeStorefront(
       {},
@@ -88,10 +86,6 @@ describe("end-to-end scenarios", () => {
       client: async () => api.client,
       notifyDeps: notify.deps,
       storage,
-      send: async (message) => {
-        sent.push(message);
-        return { id: `m${sent.length}`, adapter: "test" };
-      },
       enqueue: async (_name, payload) => {
         outbound.push(payload);
       },
@@ -115,7 +109,7 @@ describe("end-to-end scenarios", () => {
   const events = async (event: string) =>
     (await prisma.notificationDelivery.findMany({ where: { event }, orderBy: { id: "asc" } })).map((d) => d.channel);
 
-  it("(a) intake → quote → paid → postage slip → received → completed (stock used) → shown on the status page", async () => {
+  it("(a) intake → quote → paid → postage slip → received → returned with tracking (stock used) → shown on the status page", async () => {
     shop = await prisma.shop.update({
       where: { id: shop.id },
       data: { settings: { ...(shop.settings as object), ...WORKSHOP_SETTINGS, parts_enabled: "1" } },
@@ -133,7 +127,7 @@ describe("end-to-end scenarios", () => {
       "images[]": [pngFile()],
     });
     expect((await ticketOf(ticketId)).status).toBe("new");
-    expect(await events("repair_submitted")).toEqual(expect.arrayContaining(["email", "staff_email"]));
+    expect(await events("repair_submitted")).toEqual([]);
 
     // 2. Staff build the quote in the admin (price from Shopify) and send it.
     expect(await addLineItem(shop, adminApi(), ticketId, { kind: "repair", variantId: "900", quantity: 1 } as never)).toEqual({
@@ -144,6 +138,11 @@ describe("end-to-end scenarios", () => {
     const sentResult = await sendQuote({ shopId: shop.id, quotationId: draft.id, actor: "staff", client: api.client, enqueue: async () => {} });
     expect(sentResult).toEqual({ ok: true, warranty: false });
     expect(api.kinds()).toEqual(expect.arrayContaining(["create", "invoice"]));
+    // The draft order carries what Shopify's order confirmation shows: the postage slip link.
+    const created = api.calls.find(([kind]) => kind === "create")![1].input as { customAttributes: { key: string }[] };
+    expect(created.customAttributes.map((a) => a.key)).toEqual(
+      expect.arrayContaining(["repair_ticket_id", "shopcare_postage_slip_url", "shopcare_workshop_address"]),
+    );
     expect([(await ticketOf(ticketId)).status, (await quoteFor(ticketId)).status]).toEqual(["quoted", "sent"]);
 
     // 3. The customer pays the invoice: Shopify's orders/paid.
@@ -160,9 +159,8 @@ describe("end-to-end scenarios", () => {
     expect((await deliver(ordersPaid, "orders/paid", paid)).status).toBe(200);
     await deliver(ordersPaid, "orders/paid", paid); // retried delivery
     expect([(await ticketOf(ticketId)).status, (await quoteFor(ticketId)).status]).toEqual(["awaiting_item", "paid"]);
-    expect(await events("quote_paid")).toContain("staff_email");
-    // The customer is asked to post the item, once, and the status page links the slip.
-    expect(await events("item_requested")).toEqual(["email"]);
+    expect(await events("quote_paid")).toEqual(["flow"]);
+    // No ShopCare email: the status page links the slip (as the order confirmation did).
     const waiting = (await (await runRoute(status, signedGet("/proxy/status", domain, { customerId: CUSTOMER }))).json()) as {
       tickets: { postage_slip_url?: string }[];
     };
@@ -170,16 +168,25 @@ describe("end-to-end scenarios", () => {
 
     // 3b. The parcel arrives; staff mark it received and start the repair.
     expect(await markItemReceived({ shopId: shop.id, ticketId, actor: "staff", client: api.client, enqueue: async () => {} })).toMatchObject({ ok: true });
-    expect(await events("item_received")).toEqual(["email"]);
     await changeTicketStatus({ shopId: shop.id, ticketId, to: "in_repair", actor: "staff", client: api.client, enqueue: async () => {} });
     expect(await prisma.item.count()).toBe(0); // a repair invoice isn't a purchase
 
-    // 4. Staff complete the repair: recipe parts come out of stock.
-    const done = await changeTicketStatus({ shopId: shop.id, ticketId, to: "completed", actor: "staff", client: api.client, enqueue: async () => {} });
-    expect(done).toMatchObject({ ok: true, changed: true });
+    // 4. Staff post it back with tracking: the order is fulfilled (Shopify's shipping
+    //    confirmation), the ticket completes and recipe parts come out of stock.
+    await prisma.quotation.update({ where: { id: draft.id }, data: { shopifyOrderId: "5001" } });
+    const done = await returnRepairedItem({
+      shopId: shop.id,
+      ticketId,
+      actor: "staff",
+      tracking: { company: "Royal Mail", number: "RM1GB" },
+      client: api.client,
+      enqueue: async () => {},
+    });
+    expect(done).toMatchObject({ ok: true });
     expect(done.ok && done.message).toContain("1 part taken from stock");
+    expect(api.kinds()).toContain("fulfil");
     expect(Number((await prisma.partVariant.findUniqueOrThrow({ where: { id: glueVariant.id } })).onHand)).toBe(470);
-    expect(await events("repair_status_changed")).toContain("email");
+    expect(await events("repair_status_changed")).toContain("flow");
 
     // 5. The storefront status page shows it, completed.
     const page = (await (await runRoute(status, signedGet("/proxy/status", domain, { customerId: CUSTOMER }))).json()) as {
@@ -243,7 +250,7 @@ describe("end-to-end scenarios", () => {
     expect([declined.status, declined.decisionReason]).toEqual(["declined", "Too dear"]);
     expect((await ticketOf(ticketId)).status).toBe("quote_declined");
     expect(api.kinds()).toContain("delete");
-    const staff = await prisma.notificationDelivery.findFirstOrThrow({ where: { event: "quote_declined", channel: "staff_email" } });
+    const staff = await prisma.notificationDelivery.findFirstOrThrow({ where: { event: "quote_declined", channel: "flow" } });
     expect(staff.status).toBe("pending");
     expect(notify.enqueued).toContain(String(staff.id));
   });

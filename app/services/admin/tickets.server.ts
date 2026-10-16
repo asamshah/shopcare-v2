@@ -57,7 +57,6 @@ import { declineQuote, expireQuote } from "../quotes/decision.server";
 import { resendInvoice } from "../quotes/resend.server";
 import { reviseQuote } from "../quotes/revise.server";
 import { sendQuote } from "../quotes/send.server";
-import { resendPostageEmail } from "../repairs/item-postage.server";
 import { changeTicketStatus, markItemReceived } from "../repairs/ticket-status.server";
 import { RETURNABLE_STATUSES, returnRepairedItem } from "../repairs/return-item.server";
 import type { Tracking } from "../../shopify/fulfillments.server";
@@ -233,9 +232,7 @@ export async function ticketDetail(shop: Shop, admin: AdminGraphqlClient, id: nu
       receivedAt: ticket.itemReceivedAt ? formatDateTime(ticket.itemReceivedAt) : null,
       /** One line, or null until Settings → Repairs has a complete workshop address. */
       workshopAddress: workshop ? workshopAddressLines(workshop).join(", ") : null,
-      emailsSent: ticket.postageEmailsSent,
       canMarkReceived: open && !ticket.itemReceivedAt,
-      canResend: ticket.status === "awaiting_item" && Boolean(ticket.customerEmail?.trim()),
       canDownload: open && workshop !== null,
       /** "Mark returned": fulfils the paid repair order with tracking (Shopify's shipping confirmation). */
       canReturn:
@@ -656,9 +653,3 @@ export async function markTicketReturned(
   return result.ok ? { notice: result.message } : { alert: result.error };
 }
 
-/** "Resend postage email". */
-export async function resendTicketPostageEmail(shop: Shop, ticketId: number): Promise<Outcome> {
-  const ticket = await findTicket(shop, ticketId);
-  const result = await resendPostageEmail(shop, ticket.id);
-  return result.ok ? { notice: result.message } : { alert: result.error };
-}

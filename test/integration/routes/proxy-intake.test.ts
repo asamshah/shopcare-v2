@@ -230,7 +230,7 @@ describe("POST /proxy/intake", () => {
     expect(log.body).toBe("Product chosen from the catalogue: purchase not verified, no cover applied.");
   });
 
-  it("queues the outbound webhook and emits repair_submitted", async () => {
+  it("queues the outbound webhook; no email", async () => {
     await prisma.shop.update({
       where: { id: shop.id },
       data: { settings: { webhook_url: "https://hooks.example.com/shopcare", notifications: { status_url: "https://proxy-test.example/pages/repairs" } } },
@@ -241,13 +241,7 @@ describe("POST /proxy/intake", () => {
       { name: "outbound-webhook", payload: { shopId: String(shop.id), ticketId: String(body.ticket_id), event: "submitted" } },
     ]);
     const deliveries = [...fakes.notifications.store.deliveries.values()];
-    expect(deliveries.map((d) => [d.event, d.channel])).toEqual(
-      expect.arrayContaining([["repair_submitted", "email"]]),
-    );
-    const submitted = deliveries.find((d) => d.event === "repair_submitted")!;
-    expect(submitted.payload.data).toMatchObject({
-      statusUrl: "https://proxy-test.example/pages/repairs",
-      adminUrl: `https://admin.shopify.com/store/proxy-test/apps/shopcare/app/tickets/${body.ticket_id}`,
-    });
+    // No ShopCare email for a new request.
+    expect(deliveries.map((d) => [d.event, d.channel])).toEqual([]);
   });
 });

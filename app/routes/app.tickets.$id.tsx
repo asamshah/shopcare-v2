@@ -19,7 +19,6 @@ import {
   removeLineItem,
   removeTicketPart,
   resendTicketInvoice,
-  resendTicketPostageEmail,
   reviseTicketQuote,
   sendTicketQuote,
   ticketDetail,
@@ -36,8 +35,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
 const INTENTS = [
   "status", "note", "link_item", "add_line", "remove_line", "send", "resend", "revise", "decline", "cover",
-  "plan_parts", "add_part", "update_part", "remove_part", "mark_received", "resend_postage",
-  "mark_returned",
+  "plan_parts", "add_part", "update_part", "remove_part", "mark_received", "mark_returned",
 ] as const;
 
 const zQuantity = z
@@ -134,9 +132,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         number: parse(zText(255), f("tracking_number")),
         url: parse(zText(2000), f("tracking_url")),
       });
-      break;
-    case "resend_postage":
-      flash = await resendTicketPostageEmail(shop, id);
       break;
   }
   return redirectWithFlash(`/app/tickets/${id}`, flash);
@@ -571,7 +566,7 @@ function QuoteDecision({ decision }: { decision: Decision }) {
   );
 }
 
-/** The customer posts the item: postage slip, resend, and "Mark received". */
+/** The customer posts the item (postage slip, "Mark received"); staff post it back ("Mark returned"). */
 function PostageSection({ d }: { d: Detail }) {
   const { postage, ticket } = d;
   if (!postage.awaiting && !postage.receivedAt && !postage.canMarkReceived && !postage.canReturn) return null;
@@ -582,15 +577,13 @@ function PostageSection({ d }: { d: Detail }) {
           <s-text>Received at the workshop {postage.receivedAt}.</s-text>
         ) : postage.awaiting ? (
           <s-text>
-            Waiting for the customer to post the item
-            {postage.emailsSent > 0
-              ? `. Postage slip emailed${postage.emailsSent > 1 ? ` ${postage.emailsSent} times` : ""}.`
-              : "."}
+            Waiting for the customer to post the item. Shopify&apos;s order confirmation gave them the postage slip
+            link; they can also download it from the Repair status page.
           </s-text>
         ) : (
           <s-text color="subdued">
-            Not received yet. Once the quote is paid the customer is emailed a postage slip; if the item is already
-            here, mark it received and paying starts the repair.
+            Not received yet. Once the quote is paid, Shopify&apos;s order confirmation gives the customer the postage
+            slip; if the item is already here, mark it received and paying starts the repair.
           </s-text>
         )}
         {postage.workshopAddress ? null : (
@@ -610,14 +603,6 @@ function PostageSection({ d }: { d: Detail }) {
           ) : null}
           {postage.canDownload ? (
             <DownloadButton href={`/app/tickets/${ticket.id}/postage_slip`}>Download postage slip</DownloadButton>
-          ) : null}
-          {postage.canResend && postage.workshopAddress ? (
-            <Form method="post">
-              <Intent value="resend_postage" />
-              <s-button type="submit" icon="email">
-                Resend postage email
-              </s-button>
-            </Form>
           ) : null}
         </s-stack>
         {postage.canReturn ? (

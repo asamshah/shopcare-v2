@@ -1,6 +1,6 @@
 /**
- * The ticket page's Item section: Mark received, Resend postage email and
- * the postage slip download, against the real services.
+ * The ticket page's Item section: Mark received, Mark returned and the
+ * postage slip download, against the real services.
  */
 import type { Prisma, RepairTicket, Shop } from "@prisma/client";
 import { PDFDocument } from "pdf-lib";
@@ -43,9 +43,7 @@ describe("ticket page: postage", () => {
       awaiting: true,
       receivedAt: null,
       workshopAddress: "Acme Repairs, 4 Cobbler's Yard, Northampton NN1 1AA, United Kingdom",
-      emailsSent: 0,
       canMarkReceived: true,
-      canResend: true,
       canDownload: true,
       canReturn: false,
     });
@@ -87,7 +85,6 @@ describe("ticket page: postage", () => {
     const res = (await get(slipLoader, `${path()}/postage_slip`, { id: String(ticket.id) })) as Response;
     expect(res.status).toBe(409);
     expect(await res.text()).toMatch(/Settings → Repairs/);
-    expect(flash(await act("resend_postage")).alert).toMatch(/workshop address/);
   });
 
   it("downloads the postage slip PDF", async () => {
@@ -109,31 +106,25 @@ describe("ticket page: postage", () => {
     expect(res.status).toBe(404);
   });
 
-  it("Resend postage email queues another email", async () => {
-    await setup();
-    expect(flash(await act("resend_postage"))).toEqual({ path: path(), notice: "Postage email sent again to sarah@example.com." });
-    expect(await prisma.notificationDelivery.count({ where: { event: "item_requested" } })).toBe(1);
-    expect((await detail()).postage.emailsSent).toBe(1);
-  });
-
   it("Mark received moves the ticket on and logs it", async () => {
     await setup();
     expect(flash(await act("mark_received"))).toEqual({
       path: path(),
-      notice: "Item marked as received. The customer has been told.",
+      notice: "Item marked as received.",
     });
     const data = await detail();
     expect(data.ticket.status).toBe("received");
-    expect(data.postage).toMatchObject({ awaiting: false, canMarkReceived: false, canResend: false });
+    expect(data.postage).toMatchObject({ awaiting: false, canMarkReceived: false });
     expect(data.postage.receivedAt).not.toBeNull();
     expect(data.activities[0].body).toBe("Status changed from awaiting_item to received.");
-    expect(await prisma.notificationDelivery.count({ where: { event: "item_received" } })).toBe(1);
+    // No ShopCare email: the storefront Repair status block shows it.
+    expect(await prisma.notificationDelivery.count()).toBe(0);
     expect(flash(await act("mark_received")).alert).toBe("This item is already marked as received.");
   });
 
   it("an item that turns up before the quote can be marked received", async () => {
     await setup(undefined, "assessing");
-    expect((await detail()).postage).toMatchObject({ awaiting: false, canMarkReceived: true, canResend: false });
+    expect((await detail()).postage).toMatchObject({ awaiting: false, canMarkReceived: true });
     expect(flash(await act("mark_received")).notice).toMatch(/marked as received/);
     expect((await detail()).ticket.status).toBe("assessing");
   });

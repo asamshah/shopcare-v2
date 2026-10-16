@@ -1,11 +1,10 @@
 /**
- * Flow trigger payload parity with the extension TOMLs, the Flow and Klaviyo
- * clients, and the Shopify-backed marketing consent check.
+ * Flow trigger payload parity with the extension TOMLs, and the Flow and
+ * Klaviyo clients.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { shopifyMarketingConsent } from "../../../app/services/notifications/consent.server";
 import { DeliveryError } from "../../../app/services/notifications/delivery-error.server";
 import {
   EVENTS,
@@ -14,7 +13,6 @@ import {
   type RepairStatus,
 } from "../../../app/services/notifications/events.server";
 import { FlowClient } from "../../../app/services/notifications/flow-client.server";
-import { CUSTOMER_MARKETING_CONSENT_QUERY } from "../../../app/shopify/customers.server";
 import {
   InvalidFlowCustomerIdError,
   flowCustomerId,
@@ -60,14 +58,6 @@ const samples: { [E in EventName]: EventData[E] } = {
     status: "in_repair",
     productTitle: "Boot",
   },
-  item_requested: {
-    ticketId: 1,
-    productTitle: "Boot",
-    workshopAddress: ["Workshop"],
-    instructions: "Post it",
-    sendNumber: 1,
-  },
-  item_received: { ticketId: 1, productTitle: "Boot" },
   care_activated: {
     coverId: 1,
     carePlan: "Care",
@@ -310,68 +300,6 @@ describe("KlaviyoClient", () => {
       throw new TypeError("fetch failed");
     }) as unknown as typeof fetch;
     await expect(track(offline)).rejects.toMatchObject({ retryable: true });
-  });
-});
-
-describe("shopifyMarketingConsent", () => {
-  const consentFor = (address: unknown) =>
-    shopifyMarketingConsent(
-      new FakeGraphql({
-        "customer(id:": {
-          customer:
-            address === undefined ? null : { defaultEmailAddress: address },
-        },
-      }),
-    );
-
-  it("is true only for SUBSCRIBED, for the same address", async () => {
-    const subscribed = consentFor({
-      emailAddress: "A@example.com",
-      marketingState: "SUBSCRIBED",
-    });
-    await expect(
-      subscribed({ customerId: "77", email: "a@example.com" }),
-    ).resolves.toBe(true);
-    await expect(
-      subscribed({ customerId: "77", email: "other@example.com" }),
-    ).resolves.toBe(false);
-
-    for (const state of [
-      "NOT_SUBSCRIBED",
-      "PENDING",
-      "UNSUBSCRIBED",
-      "INVALID",
-    ]) {
-      await expect(
-        consentFor({ emailAddress: "a@example.com", marketingState: state })({
-          customerId: "77",
-          email: "a@example.com",
-        }),
-      ).resolves.toBe(false);
-    }
-    await expect(consentFor(undefined)({ customerId: "77" })).resolves.toBe(
-      false,
-    );
-  });
-
-  it("asks for the customer by GID and never for guests", async () => {
-    const fake = new FakeGraphql({
-      "customer(id:": {
-        customer: { defaultEmailAddress: { marketingState: "SUBSCRIBED" } },
-      },
-    });
-    const check = shopifyMarketingConsent(fake);
-
-    await expect(
-      check({ customerId: null, email: "g@example.com" }),
-    ).resolves.toBe(false);
-    expect(fake.calls).toHaveLength(0);
-
-    await check({ customerId: "77" });
-    expect(fake.calls[0].query).toBe(CUSTOMER_MARKETING_CONSENT_QUERY);
-    expect(fake.calls[0].variables).toEqual({
-      id: "gid://shopify/Customer/77",
-    });
   });
 });
 

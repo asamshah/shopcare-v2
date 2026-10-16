@@ -13,7 +13,8 @@
  *
  * A £0 quote (warranty / Care) needs no payment: its draft order is completed
  * straight away (no invoice email), the quote is paid and the ticket moves on
- * like a paid one: to awaiting_item (postage slip emailed), or to in_repair
+ * like a paid one: to awaiting_item (Shopify's order confirmation carries the
+ * postage slip link), or to in_repair
  * when the workshop already has the item.
  *
  * The quotation stays row-locked for the whole send, so a double-submit waits

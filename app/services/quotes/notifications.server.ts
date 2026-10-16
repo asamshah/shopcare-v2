@@ -1,7 +1,8 @@
 /**
  * Staff alerts about a sent quote: paid (accepted), declined or expired.
- * Port of Repairs::QuoteNotifications. They go to the staff email ("Notify
- * staff at") and, when enabled, the Flow staff-alert triggers / Klaviyo. The
+ * Port of Repairs::QuoteNotifications. They go to the Flow staff-alert
+ * triggers (when Flow is on; merchants add "Send internal email") and
+ * Klaviyo; the admin's Needs attention list shows them either way. The
  * customer's quote email is Shopify's own invoice (sendQuote).
  */
 import type { Quotation, RepairTicket, Shop } from "@prisma/client";

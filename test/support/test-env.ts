@@ -21,7 +21,4 @@ export const testEnv = {
   APP_ENCRYPTION_PREVIOUS_KEYS: "",
   STORAGE_DRIVER: "memory",
   BACKGROUND_DISPATCH: "sync",
-  EMAIL_ADAPTER: "log",
-  EMAIL_FROM_DOMAIN: "mail.shopcare.test",
-  EMAIL_DEFAULT_FROM_NAME: "ShopCare",
 };

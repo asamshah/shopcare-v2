@@ -28,29 +28,8 @@ import { requireAdmin } from "../services/admin/context.server";
 import { redirectWithFlash } from "../services/admin/flash.server";
 import { field, parse, readForm } from "../services/admin/form.server";
 import { hasSecret, saveSettings, sendKlaviyoTest } from "../services/admin/settings.server";
-import { EMAIL_KINDS } from "../services/notifications/events.server";
-import { isEmailEnabled } from "../services/notifications/settings.server";
-
-const EMAIL_LABELS: Record<(typeof EMAIL_KINDS)[number], [string, string]> = {
-  repair_received: ["Repair request received", "To the customer when they submit a repair request."],
-  repair_status_changed: ["Repair status changed", "To the customer when a repair is assessed, in repair, ready or returned."],
-  send_item: [
-    "Send your item to us",
-    "To the customer once the quote is paid (or covered): the postage slip PDF attached, plus a download link.",
-  ],
-  item_received: ["We've received your item", "To the customer when you mark their parcel as received."],
-  care_welcome: ["Care plan welcome", "To the customer when their Care plan starts."],
-  care_credit_issued: ["Care credit code", "To the customer when a refunded item's Care becomes a credit code."],
-  care_offer: ["Add Care to your purchase", "Marketing: only to customers subscribed to email marketing. Off until you switch it on."],
-  staff_repair_request: ["New repair request", "Staff alert."],
-  staff_quote_paid: ["Quote paid", "Staff alert."],
-  staff_quote_declined: ["Quote declined", "Staff alert, with the customer's reason."],
-  staff_quote_expired: ["Quote expired", "Staff alert."],
-};
 
 const CHANNEL_LABELS: Record<string, string> = {
-  email: "Email",
-  staff_email: "Staff email",
   flow: "Shopify Flow",
   klaviyo: "Klaviyo",
 };
@@ -64,16 +43,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const rp = jsonObject(settings.repair_products as never);
   const email = jsonObject(settings.email as never);
   const notifications = notificationsSettings(shop);
-  const emails = jsonObject(notifications.emails as never);
   const [planCount, deliveries] = await Promise.all([
     prisma.carePlan.count({ where: { shopId: shop.id } }),
     prisma.notificationDelivery.findMany({ where: { shopId: shop.id }, orderBy: DELIVERIES_ORDER, take: 15 }),
   ]);
-  const enabled = (kind: (typeof EMAIL_KINDS)[number]) =>
-    isEmailEnabled(
-      { shopId: shop.shopifyDomain, shopName: "", flowEnabled: false, emails: { [kind]: jsonObject(emails[kind] as never) } },
-      kind,
-    );
   return {
     repairProducts: {
       mode: rp.mode === "collection" ? "collection" : "tag",
@@ -98,22 +71,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       : null,
     notifications: {
       flow: notifications.flow === true || notifications.flow === "true",
-      staffEmail: text(notifications.staff_email),
-      supportEmail: text(notifications.support_email),
       careOfferDelayDays: String(careOfferDelayDays(shop)),
       statusUrl: text(notifications.status_url),
-      contactEmail: text(settings.contact_email),
-      emails: EMAIL_KINDS.map((kind) => {
-        const entry = jsonObject(emails[kind] as never);
-        return {
-          kind,
-          label: EMAIL_LABELS[kind][0],
-          details: EMAIL_LABELS[kind][1],
-          enabled: enabled(kind),
-          subject: text(entry.subject),
-          intro: text(entry.intro),
-        };
-      }),
     },
     webhookUrl: text(settings.webhook_url),
     hasKlaviyoKey: hasSecret(shop, "klaviyoApiKey"),
@@ -227,14 +186,14 @@ export default function Settings() {
 
               <s-heading>Workshop address</s-heading>
               <s-paragraph color="subdued">
-                Where customers post their items. Once a quote is paid (or covered), ShopCare emails the customer a
-                postage slip to print: an address label for the parcel and a packing slip to put inside. Customers pay
+                Where customers post their items. Once a quote is paid (or covered), Shopify&apos;s order confirmation gives the customer a
+                link to a postage slip to print: an address label for the parcel and a packing slip to put inside. Customers pay
                 their own postage.
               </s-paragraph>
               {d.workshopAddressComplete ? null : (
                 <s-banner tone="warning">
-                  Add the workshop&apos;s name, address, town, postcode and country. Until then no postage slips are
-                  sent.
+                  Add the workshop&apos;s name, address, town, postcode and country. Until then the order confirmation has no
+                  postage slip link.
                 </s-banner>
               )}
               <s-grid grid-template-columns="1fr 1fr" gap="small-200">
@@ -397,71 +356,24 @@ export default function Settings() {
                 ></s-text-area>
               </s-stack>
 
-              <s-stack direction="block" gap="small-200">
-                <s-heading>ShopCare emails</s-heading>
-                <s-paragraph color="subdued">
-                  ShopCare emails your customers and staff from your store&apos;s name. Switch off any email your email
-                  tool already sends. Leave a subject or intro blank to use ours; {"{{first_name}}"}, {"{{product}}"} and
-                  {" {{ticket_number}}"} are filled in.
-                </s-paragraph>
-                <s-grid grid-template-columns="1fr 1fr" gap="small-200">
-                  <s-email-field
-                    label="Notify staff at"
-                    name="notifications[staff_email]"
-                    value={d.notifications.staffEmail}
-                    placeholder="workshop@yourstore.com"
-                    details="Where staff alerts go (new repair requests, quotes paid, declined or expired)."
-                  ></s-email-field>
-                  <s-email-field
-                    label="Reply-to address"
-                    name="notifications[support_email]"
-                    value={d.notifications.supportEmail}
-                    placeholder={d.notifications.contactEmail || "support@yourstore.com"}
-                    details="Customers' replies go here. Leave blank to use your store's contact email."
-                  ></s-email-field>
-                  <s-url-field
-                    label="Repair status page"
-                    name="notifications[status_url]"
-                    value={d.notifications.statusUrl}
-                    placeholder="https://yourstore.com/pages/repair-status"
-                    details="The page with the Repair status block. Customers' repair emails link to it."
-                  ></s-url-field>
-                  <s-number-field
-                    label="Send the Add Care offer after (days)"
-                    name="notifications[care_offer_delay_days]"
-                    value={d.notifications.careOfferDelayDays}
-                    min={1}
-                    max={365}
-                    step={1}
-                    details="Days after purchase that customers who bought something Care could cover get the offer."
-                  ></s-number-field>
-                </s-grid>
-                {d.notifications.emails.map((e) => (
-                  <s-box key={e.kind} padding="small-200" border="base" border-radius="base">
-                    <s-stack direction="block" gap="small-200">
-                      <input type="hidden" name={`notifications[emails][${e.kind}][enabled]`} value="0" />
-                      <s-checkbox
-                        name={`notifications[emails][${e.kind}][enabled]`}
-                        value="1"
-                        label={e.label}
-                        details={e.details}
-                        {...checkedIf(e.enabled)}
-                      ></s-checkbox>
-                      <s-text-field
-                        label="Subject"
-                        name={`notifications[emails][${e.kind}][subject]`}
-                        value={e.subject}
-                      ></s-text-field>
-                      <s-text-area
-                        label="Intro"
-                        name={`notifications[emails][${e.kind}][intro]`}
-                        rows={2}
-                        value={e.intro}
-                      ></s-text-area>
-                    </s-stack>
-                  </s-box>
-                ))}
-              </s-stack>
+              <s-grid grid-template-columns="1fr 1fr" gap="small-200">
+                <s-url-field
+                  label="Repair status page"
+                  name="notifications[status_url]"
+                  value={d.notifications.statusUrl}
+                  placeholder="https://yourstore.com/pages/repair-status"
+                  details="The page with the Repair status block. The order confirmation links to it."
+                ></s-url-field>
+                <s-number-field
+                  label="Send the Add Care offer after (days)"
+                  name="notifications[care_offer_delay_days]"
+                  value={d.notifications.careOfferDelayDays}
+                  min={1}
+                  max={365}
+                  step={1}
+                  details="Days after purchase that the Add Care offer Flow trigger fires."
+                ></s-number-field>
+              </s-grid>
             </s-stack>
           </s-section>
 

@@ -147,10 +147,11 @@ export function careSettings(shop: Pick<Shop, "settings">): Record<string, unkno
 }
 
 /**
- * Notification settings (settings.notifications). Flow is an optional
- * integration in v2 and OFF unless the merchant turns it on (Rails defaulted
- * it on; no shops are migrated). `care_offer_delay_days`: how many days after
- * purchase the "Add Care" offer goes out (see careOfferDelayDays).
+ * Notification settings (settings.notifications): `flow` (Shopify Flow
+ * triggers, OFF unless the merchant turns it on: ShopCare works fully without
+ * Flow), `care_offer_delay_days` (how many days after purchase the "Add Care"
+ * offer goes out, see careOfferDelayDays) and `status_url` (the storefront
+ * Repair status page).
  */
 export function notificationsSettings(shop: Pick<Shop, "settings">): Record<string, unknown> {
   return {
@@ -160,12 +161,18 @@ export function notificationsSettings(shop: Pick<Shop, "settings">): Record<stri
   };
 }
 
+/** Is the Shopify Flow integration on (Settings → Emails)? Off by default. */
+export function flowEnabled(shop: Pick<Shop, "settings">): boolean {
+  const flow = notificationsSettings(shop).flow;
+  return flow === true || flow === "true";
+}
+
 export const DEFAULT_CARE_OFFER_DELAY_DAYS = 7;
 
 /**
  * The storefront page with the Repair status block
- * (settings.notifications.status_url), linked from the customer's repair
- * emails. Only an absolute http(s) URL; null when not set.
+ * (settings.notifications.status_url), linked from the Order confirmation
+ * snippet and the repair form's confirmation. Only an absolute http(s) URL; null when not set.
  */
 export function repairStatusUrl(shop: Pick<Shop, "settings">): string | null {
   const value = notificationsSettings(shop).status_url;
@@ -180,7 +187,7 @@ export function repairStatusUrl(shop: Pick<Shop, "settings">): string | null {
 
 /**
  * The ticket in the ShopCare admin (app.tickets.$id → /app/tickets/:id),
- * for staff emails. SHOPIFY_APP_HANDLE is the app's handle in the admin URL.
+ * for Flow staff alerts and the postage slip's QR code. SHOPIFY_APP_HANDLE is the app's handle in the admin URL.
  */
 export function adminTicketUrl(shopDomain: string, ticketId: number): string {
   const store = shopDomain.replace(/\.myshopify\.com$/, "");

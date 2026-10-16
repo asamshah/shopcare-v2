@@ -37,7 +37,6 @@ export interface NotificationDelivery<E extends EventName = EventName> {
   payload: DeliveryPayload<E>;
   attempts: number;
   error: string | null;
-  providerMessageId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,7 +55,7 @@ export interface NotificationStore {
     input: ClaimInput,
   ): Promise<{ delivery: NotificationDelivery; created: boolean }>;
   find(id: string): Promise<NotificationDelivery | null>;
-  markSent(id: string, providerMessageId?: string | null): Promise<void>;
+  markSent(id: string): Promise<void>;
   markSkipped(id: string, reason: string): Promise<void>;
   /**
    * Records a failed attempt (attempts + 1, error). `final` marks the delivery
@@ -93,7 +92,6 @@ export class InMemoryNotificationStore implements NotificationStore {
       status: "pending",
       attempts: 0,
       error: null,
-      providerMessageId: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -106,12 +104,8 @@ export class InMemoryNotificationStore implements NotificationStore {
     return delivery ? structuredClone(delivery) : null;
   }
 
-  async markSent(id: string, providerMessageId?: string | null) {
-    this.update(id, {
-      status: "sent",
-      error: null,
-      providerMessageId: providerMessageId ?? null,
-    });
+  async markSent(id: string) {
+    this.update(id, { status: "sent", error: null });
   }
 
   async markSkipped(id: string, reason: string) {

@@ -220,37 +220,19 @@ describe("settings", () => {
     expect((await show()).tradeIn?.credit_days).toBe("90");
   });
 
-  it("v2 notifications: per-email toggles, subject and intro, staff and reply-to addresses", async () => {
-    const shop = await setup({ contact_email: "hello@shop.test" });
-    expect((await show()).notifications.emails.find((e) => e.kind === "care_offer")?.enabled).toBe(false);
+  it("Shopify Flow is off by default and can be switched on; there are no ShopCare email settings", async () => {
+    const shop = await setup();
+    expect((await show()).notifications.flow).toBe(false);
+    expect((await loadNotificationSettings(shop.shopifyDomain))?.flowEnabled).toBe(false);
 
-    await save({
-      "notifications[staff_email]": "workshop@shop.test",
-      "notifications[support_email]": "",
-      "notifications[emails][repair_received][enabled]": ["0"],
-      "notifications[emails][repair_received][subject]": "Got it: #{{ticket_number}}",
-      "notifications[emails][repair_received][intro]": "Thanks!",
-      "notifications[emails][care_offer][enabled]": ["0", "1"],
-      "notifications[emails][care_offer][subject]": "",
-      "notifications[emails][care_offer][intro]": "",
-    });
+    await save({ "notifications[flow]": ["0", "1"] });
+    expect((await loadNotificationSettings(shop.shopifyDomain))?.flowEnabled).toBe(true);
+    expect((await show()).notifications.flow).toBe(true);
 
-    const loaded = await loadNotificationSettings(shop.shopifyDomain);
-    expect(loaded?.staffEmail).toBe("workshop@shop.test");
-    expect(loaded?.supportEmail).toBe("hello@shop.test");
-    expect(loaded?.emails?.repair_received).toEqual({ enabled: false, subject: "Got it: #{{ticket_number}}", intro: "Thanks!" });
-    expect(loaded?.emails?.care_offer).toEqual({ enabled: true, subject: null, intro: null });
-    expect(loaded?.flowEnabled).toBe(false);
-    const data = await show();
-    expect(data.notifications.emails.find((e) => e.kind === "repair_received")).toMatchObject({
-      enabled: false,
-      subject: "Got it: #{{ticket_number}}",
-    });
-
-    expect(flash(await save({ "notifications[staff_email]": "not an email" })).alert).toBe(
-      "Notify staff at must be an email address.",
-    );
-    expect(notificationsSettings(await reload(shop.id)).staff_email).toBe("workshop@shop.test");
+    // Old email fields are ignored.
+    await save({ "notifications[staff_email]": "workshop@shop.test", "notifications[emails][care_offer][enabled]": "1" });
+    expect(notificationsSettings(await reload(shop.id))).not.toHaveProperty("staff_email");
+    expect(notificationsSettings(await reload(shop.id))).not.toHaveProperty("emails");
   });
 
   it("Add Care offer delay and the repair status page", async () => {
@@ -281,10 +263,10 @@ describe("settings", () => {
   it("lists this shop's recent notifications only", async () => {
     const shop = await setup();
     const other = await createShop();
-    await createNotificationDeliveryFor(shop, { status: "failed", error: "Bounced", channel: "email" });
+    await createNotificationDeliveryFor(shop, { status: "failed", error: "Klaviyo 401", channel: "klaviyo" });
     await createNotificationDeliveryFor(other, { status: "sent" });
     const data = await show();
-    expect(data.deliveries.map((d) => [d.channel, d.statusLabel, d.error])).toEqual([["Email", "Failed", "Bounced"]]);
+    expect(data.deliveries.map((d) => [d.channel, d.statusLabel, d.error])).toEqual([["Klaviyo", "Failed", "Klaviyo 401"]]);
   });
 
   it("saves the workshop address and posting instructions, and says when the address is incomplete", async () => {
@@ -317,16 +299,5 @@ describe("settings", () => {
     expect(completeWorkshopAddress(partial)).toBeNull();
     expect(postingInstructions(partial)).toBe(DEFAULT_POSTING_INSTRUCTIONS);
     expect((await show()).workshopAddressComplete).toBe(false);
-  });
-
-  it("lists the postage emails with the other customer emails", async () => {
-    await setup();
-    const kinds = (await show()).notifications.emails.map((e) => [e.kind, e.label, e.enabled]);
-    expect(kinds).toEqual(
-      expect.arrayContaining([
-        ["send_item", "Send your item to us", true],
-        ["item_received", "We've received your item", true],
-      ]),
-    );
   });
 });

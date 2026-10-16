@@ -165,3 +165,41 @@ export async function updateRepairStatus(
   );
   return updated;
 }
+
+export const EMAIL_MARKETING_CONSENT_UPDATE_MUTATION = `#graphql
+  mutation CustomerEmailMarketingConsentUpdate($input: CustomerEmailMarketingConsentUpdateInput!) {
+    customerEmailMarketingConsentUpdate(input: $input) {
+      customer { id }
+      userErrors { field message }
+    }
+  }
+`;
+
+/**
+ * Records in Shopify that the customer unsubscribed from email marketing
+ * (ShopCare's unsubscribe link), so the store and ShopCare agree. Admin API
+ * 2026-10: `customerEmailMarketingConsentUpdate(input: { customerId,
+ * emailMarketingConsent: { marketingState: UNSUBSCRIBED, consentUpdatedAt } })`;
+ * only SUBSCRIBED / UNSUBSCRIBED / PENDING can be set. Needs `write_customers`.
+ */
+export async function unsubscribeFromEmailMarketing(
+  client: AdminGraphqlClient,
+  customerId: string,
+  at: Date = new Date(),
+): Promise<void> {
+  const data = await adminGraphql<{
+    customerEmailMarketingConsentUpdate: { userErrors: UserError[] };
+  }>(client, EMAIL_MARKETING_CONSENT_UPDATE_MUTATION, {
+    input: {
+      customerId: buildGid("Customer", customerId),
+      emailMarketingConsent: {
+        marketingState: "UNSUBSCRIBED",
+        consentUpdatedAt: at.toISOString(),
+      },
+    },
+  });
+  assertNoUserErrors(
+    "customerEmailMarketingConsentUpdate",
+    data.customerEmailMarketingConsentUpdate,
+  );
+}

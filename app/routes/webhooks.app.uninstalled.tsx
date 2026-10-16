@@ -1,17 +1,16 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import db from "../db.server";
+import { markShopUninstalled } from "../services/gdpr/shop-redact.server";
 
+/**
+ * app/uninstalled: one quick write, so it's done inline. The shop is marked
+ * uninstalled and its sessions deleted (jobs and notifications stop); its
+ * data is erased by shop/redact ~48 h later (see
+ * app/services/gdpr/shop-redact.server.ts). Repeat deliveries are no-ops.
+ */
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, session, topic } = await authenticate.webhook(request);
-
-  console.log(`Received ${topic} webhook for ${shop}`);
-
-  // Webhook requests can trigger multiple times and after an app has already been uninstalled.
-  // If this webhook already ran, the session may have been deleted previously.
-  if (session) {
-    await db.session.deleteMany({ where: { shop } });
-  }
-
+  const { shop, topic } = await authenticate.webhook(request);
+  console.info(`Received ${topic} webhook for ${shop}`);
+  await markShopUninstalled(shop);
   return new Response();
 };

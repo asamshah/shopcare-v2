@@ -311,6 +311,36 @@ export function recentPaidOrdersQuery(since: Date): string {
   return `processed_at:>=${day} AND (financial_status:paid OR financial_status:partially_refunded)`;
 }
 
+export interface PaidOrdersPage {
+  orders: OrderData[];
+  /** Pass as `after` for the next page; null on the last page. */
+  nextCursor: string | null;
+}
+
+/** One page of paid (or partly refunded) orders processed since `since`. */
+export async function fetchPaidOrdersPage(
+  client: AdminGraphqlClient,
+  since: Date,
+  after: string | null = null,
+): Promise<PaidOrdersPage> {
+  const data: {
+    orders: {
+      nodes: OrderNode[];
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    };
+  } = await adminGraphql(client, ORDERS_QUERY, {
+    first: RECENT_ORDERS_PAGE_SIZE,
+    after,
+    q: recentPaidOrdersQuery(since),
+  });
+  return {
+    orders: (data.orders.nodes ?? []).map(orderFromGraphql),
+    nextCursor: data.orders.pageInfo.hasNextPage
+      ? data.orders.pageInfo.endCursor
+      : null,
+  };
+}
+
 /**
  * Every paid (or partly refunded) order processed since `since`, one page at
  * a time. Errors propagate so the job can retry.
@@ -319,22 +349,12 @@ export async function* fetchRecentPaidOrders(
   client: AdminGraphqlClient,
   since: Date,
 ): AsyncGenerator<OrderData[]> {
-  const q = recentPaidOrdersQuery(since);
   let after: string | null = null;
   for (let page = 0; page < RECENT_ORDERS_MAX_PAGES; page++) {
-    const data: {
-      orders: {
-        nodes: OrderNode[];
-        pageInfo: { hasNextPage: boolean; endCursor: string | null };
-      };
-    } = await adminGraphql(client, ORDERS_QUERY, {
-      first: RECENT_ORDERS_PAGE_SIZE,
-      after,
-      q,
-    });
-    yield (data.orders.nodes ?? []).map(orderFromGraphql);
-    if (!data.orders.pageInfo.hasNextPage) return;
-    after = data.orders.pageInfo.endCursor;
+    const result: PaidOrdersPage = await fetchPaidOrdersPage(client, since, after);
+    yield result.orders;
+    if (!result.nextCursor) return;
+    after = result.nextCursor;
   }
 }
 

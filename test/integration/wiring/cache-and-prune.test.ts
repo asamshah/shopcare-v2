@@ -63,7 +63,7 @@ describe("daily prune", () => {
     await cache.set("old", 1, -1);
     await cache.set("fresh", 1, 60_000);
 
-    expect(await pruneStaleRows(t0)).toEqual({ throttles: 1, cacheEntries: 1 });
+    expect(await pruneStaleRows(t0)).toEqual({ throttles: 1, cacheEntries: 1, exports: 0 });
     expect((await prisma.proxyThrottle.findMany()).map((r) => r.key)).toEqual(["ping/acme/ip:1"]);
     expect((await prisma.cacheEntry.findMany()).map((r) => r.key)).toEqual(["fresh"]);
   });

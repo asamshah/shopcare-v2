@@ -26,17 +26,21 @@ sends its own emails, and Flow and Klaviyo become optional integrations.
 
 ```
 app/
-  routes/            React Router routes: app.* (admin), proxy.* (App Proxy), webhooks.*, files.$
+  routes/            React Router routes: app.* (admin), proxy.* (App Proxy), webhooks.* (Shopify +
+                     webhooks.email for Resend), email.unsubscribe, files.$
   models/            one module per Rails model: validations, enums, business rules (plain functions over Prisma rows)
   shopify/           Admin API (GraphQL) calls: draft orders, discounts, store credit, orders, products, shop
   lib/               infrastructure and pure helpers: encryption, signing, GIDs, customer token, storage,
                      background dispatch, webhooks, http caching, row locks, Postgres cache, proxy throttling
-  services/          domain services (Rails app/services): notifications, items, care, warranty, repairs, …
+  services/          domain services (Rails app/services): notifications, items, care, warranty, repairs,
+                     quotes (send/resend/revise/decision/cancel: the shared service contract),
+                     payments, gdpr (customer export + redaction, shop redaction), parts, trade_ins, …
   jobs/              background job handlers + registry
   shopify.server.ts  @shopify/shopify-app-react-router setup (Prisma session storage)
   db.server.ts       Prisma client
 netlify/functions/   jobs-background.mts (Background Function); Scheduled: daily-prune.mts
-                     (throttle + cache rows), daily-care-offers.mts ("Add Care" offer), daily-example.mts
+                     (throttle + cache rows, old GDPR exports), daily-care-offers.mts ("Add Care"
+                     offer), daily-expire-quotes.mts, hourly-notification-sweep.mts
 prisma/              schema + migrations (Postgres; every Rails table, see docs/PORTING.md#schema-notes)
 extensions/          theme app extension + Flow triggers (copied unchanged from Rails)
 parked/              Flow trigger not yet shipped (trade-in status)
@@ -105,7 +109,11 @@ Production wiring is the default outside Vitest: the Postgres notification
 store and Shop-row settings, the Postgres throttle store and shared cache
 (`cache_entries`), the Shop row's customer signing key. Under Vitest those
 defaults are in-memory or must be set explicitly (`setNotificationDeps`,
-`configureAppProxy`, `setDefaultShopifyCache`, `setOutboundWebhookDeps`).
+`configureAppProxy`, `setDefaultShopifyCache`, `setOutboundWebhookDeps`,
+`setWebhookJobDeps`, `setImportOrdersDeps`). Quote/ticket services take
+`client` (the Admin GraphQL client) and `enqueue` options; tests pass
+`FakeDraftOrders` (test/support/fake-draft-orders.ts) and the
+test/support/quotes.ts fixtures.
 
 CI (`.github/workflows/ci.yml`) runs install, `prisma generate`,
 `prisma migrate deploy` against a Postgres service container, then typecheck,

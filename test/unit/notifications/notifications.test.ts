@@ -538,3 +538,37 @@ describe("notification job", () => {
     error.mockRestore();
   });
 });
+
+describe("deliverNotification: suppression list", () => {
+  it("skips a suppressed customer address", async () => {
+    ctx.deps.isSuppressed = vi.fn(async () => true);
+    await emit("care_activated", careActivated());
+    await deliverAll();
+    expect(ctx.email.sent).toHaveLength(0);
+    expect(ctx.store.all().find((d) => d.channel === "email")).toMatchObject({
+      status: "skipped",
+      error: "Address suppressed (unsubscribed, bounced or complained)",
+    });
+    expect(ctx.deps.isSuppressed).toHaveBeenCalledWith("acme.myshopify.com", "a@example.com", { marketing: false });
+  });
+
+  it("drops only the suppressed addresses from a staff list", async () => {
+    ctx.settings.current = buildSettings({ staffEmail: "one@acme.example, two@acme.example" });
+    ctx.deps.isSuppressed = vi.fn(async (_shop: string, email: string) => email === "one@acme.example");
+    await emit("repair_submitted", { ticketId: 1, productTitle: "Boot", customerEmail: "a@example.com" }, {
+      recipient: { customerId: null, email: "a@example.com" },
+    });
+    await deliverAll();
+    const staff = ctx.email.sent.find((m) => [m.to].flat().includes("two@acme.example"));
+    expect(staff?.to).toEqual(["two@acme.example"]);
+  });
+
+  it("checks marketing suppression for the Add Care email", async () => {
+    ctx.settings.current = buildSettings({ emails: { care_offer: { enabled: true } } });
+    ctx.deps.isSuppressed = vi.fn(async (_s: string, _e: string, { marketing }: { marketing: boolean }) => marketing);
+    await emit("care_offer", careOffer);
+    await deliverAll();
+    expect(ctx.email.sent).toHaveLength(0);
+    expect(ctx.store.all()[0].error).toBe("Address suppressed (unsubscribed, bounced or complained)");
+  });
+});

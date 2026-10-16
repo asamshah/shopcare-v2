@@ -44,7 +44,11 @@ export function quoteShow(args: Args) {
     let quotation = await findQuote(ctx, token);
     if (!quotation) return page(ctx, token, null);
     if (isDecisionOverdue(quotation, ctx.deps.now())) {
-      await ctx.deps.expireQuote({ shopId: ctx.shopRecord.id, quotationId: quotation.id });
+      await ctx.deps.expireQuote({
+        shopId: ctx.shopRecord.id,
+        quotationId: quotation.id,
+        ...(await decisionOptions(ctx)),
+      });
       quotation = await loadQuoteForPage(quotation.id);
     }
     return page(ctx, token, quotation);
@@ -62,7 +66,17 @@ export function quoteDecline(args: Args) {
       quotationId: quotation.id,
       reason: textParam(form, "reason"),
       by: "customer",
+      ...(await decisionOptions(ctx)),
     });
     return page(ctx, token, await loadQuoteForPage(quotation.id), result.ok ? null : result.error);
   })(args);
+}
+
+/** The proxy's Shopify client, notifications and job queue for the decision services. */
+async function decisionOptions(ctx: StorefrontContext) {
+  return {
+    client: await ctx.deps.adminClient(ctx),
+    notifyDeps: ctx.deps.notifications(),
+    enqueue: ctx.deps.enqueue,
+  };
 }

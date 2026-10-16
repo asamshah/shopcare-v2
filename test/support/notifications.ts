@@ -59,6 +59,21 @@ export const sampleEmailData: EmailData = {
     customerName: "Sarah Jones",
     statusUrl: "https://acme.example/apps/repairs/tickets/42",
   },
+  send_item: {
+    ticketId: 42,
+    productTitle: "Chelsea Boot",
+    customerName: "Sarah Jones",
+    workshopAddress: ["Acme Repairs", "4 Cobbler's Yard", "Northampton NN1 1AA", "United Kingdom"],
+    instructions: "Pack your item securely and use a tracked service. Put the packing slip inside the parcel.",
+    downloadUrl: "https://acme.myshopify.com/apps/repairs/tickets/42/postage-slip?expires=1793000000&token=abc",
+    sendNumber: 1,
+  },
+  item_received: {
+    ticketId: 42,
+    productTitle: "Chelsea Boot",
+    customerName: "Sarah Jones",
+    statusUrl: "https://acme.example/apps/repairs/tickets/42",
+  },
   care_welcome: {
     coverId: 7,
     carePlan: "Care Plus",

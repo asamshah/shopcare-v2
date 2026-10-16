@@ -61,6 +61,30 @@ export interface EventData {
     customerName?: string | null;
     statusUrl?: string | null;
   };
+  /**
+   * The quote is paid (or £0 covered): ask the customer to post the item.
+   * The email carries the postage slip PDF (NotificationDeps.attachments).
+   * `sendNumber` is 1 for the first email and counts up on each resend, so
+   * a resend gets its own delivery while a repeat of the same one doesn't.
+   */
+  item_requested: {
+    ticketId: Id;
+    productTitle: string;
+    customerName?: string | null;
+    /** The workshop address, one line per entry. */
+    workshopAddress: string[];
+    instructions: string;
+    /** Signed, expiring storefront link to the PDF (works for guests). */
+    downloadUrl?: string | null;
+    sendNumber: number;
+  };
+  /** Staff marked the customer's parcel as arrived. */
+  item_received: {
+    ticketId: Id;
+    productTitle: string;
+    customerName?: string | null;
+    statusUrl?: string | null;
+  };
   care_activated: {
     coverId: Id;
     carePlan: string;
@@ -113,6 +137,8 @@ export type EventName = keyof EventData;
 export const EMAIL_KINDS = [
   "repair_received",
   "repair_status_changed",
+  "send_item",
+  "item_received",
   "care_welcome",
   "care_credit_issued",
   "care_offer",
@@ -129,7 +155,11 @@ export const MARKETING_EMAILS: readonly EmailKind[] = ["care_offer"];
 
 export type Channel = "email" | "staff_email" | "flow" | "klaviyo";
 
-/** The repair statuses customers are emailed about; "completed" reads as "returned". */
+/**
+ * The repair statuses customers are emailed about; "completed" reads as
+ * "returned". awaiting_item and received have their own emails ("Send your
+ * item to us" with the postage slip, "We've received your item").
+ */
 export const EMAILED_REPAIR_STATUSES = {
   assessing: "assessing",
   in_repair: "in_repair",
@@ -150,6 +180,8 @@ interface EventDefinition<E extends EventName> {
   staffAlert?: boolean;
   customerEmail?: EmailKind;
   staffEmail?: EmailKind;
+  /** A file the customer email carries (resolved at send time by NotificationDeps.attachments). */
+  attachment?: "postage_slip";
   /** The record the event is about; the idempotency key is `<event>:<recordKey>`. */
   recordKey(data: EventData[E]): string;
   /** Flow trigger fields / Klaviyo event properties, keyed exactly as the trigger TOML. */
@@ -190,6 +222,23 @@ export const EVENTS: { [E in EventName]: EventDefinition<E> } = {
     fields: (d) => ({
       "Ticket number": String(d.ticketId),
       Status: humanizeStatus(d.status),
+      "Product title": d.productTitle,
+    }),
+  },
+  item_requested: {
+    customerEmail: "send_item",
+    attachment: "postage_slip",
+    recordKey: (d) => `ticket_${d.ticketId}:${d.sendNumber}`,
+    fields: (d) => ({
+      "Ticket number": String(d.ticketId),
+      "Product title": d.productTitle,
+    }),
+  },
+  item_received: {
+    customerEmail: "item_received",
+    recordKey: (d) => `ticket_${d.ticketId}`,
+    fields: (d) => ({
+      "Ticket number": String(d.ticketId),
       "Product title": d.productTitle,
     }),
   },

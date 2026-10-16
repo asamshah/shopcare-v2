@@ -59,6 +59,14 @@ const samples: { [E in EventName]: EventData[E] } = {
     status: "in_repair",
     productTitle: "Boot",
   },
+  item_requested: {
+    ticketId: 1,
+    productTitle: "Boot",
+    workshopAddress: ["Workshop"],
+    instructions: "Post it",
+    sendNumber: 1,
+  },
+  item_received: { ticketId: 1, productTitle: "Boot" },
   care_activated: {
     coverId: 1,
     carePlan: "Care",

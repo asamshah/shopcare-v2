@@ -31,6 +31,11 @@ import { isEmailEnabled } from "../services/notifications/settings.server";
 const EMAIL_LABELS: Record<(typeof EMAIL_KINDS)[number], [string, string]> = {
   repair_received: ["Repair request received", "To the customer when they submit a repair request."],
   repair_status_changed: ["Repair status changed", "To the customer when a repair is assessed, in repair, ready or returned."],
+  send_item: [
+    "Send your item to us",
+    "To the customer once the quote is paid (or covered): the postage slip PDF attached, plus a download link.",
+  ],
+  item_received: ["We've received your item", "To the customer when you mark their parcel as received."],
   care_welcome: ["Care plan welcome", "To the customer when their Care plan starts."],
   care_credit_issued: ["Care credit code", "To the customer when a refunded item's Care becomes a credit code."],
   care_offer: ["Add Care to your purchase", "Marketing: only to customers subscribed to email marketing. Off until you switch it on."],

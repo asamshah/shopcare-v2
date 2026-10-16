@@ -572,3 +572,74 @@ describe("deliverNotification: suppression list", () => {
     expect(ctx.store.all()[0].error).toBe("Address suppressed (unsubscribed, bounced or complained)");
   });
 });
+
+describe("postage emails (item_requested / item_received)", () => {
+  const requested: EventData["item_requested"] = {
+    ticketId: 42,
+    productTitle: "Boot",
+    customerName: "Sarah",
+    workshopAddress: ["Acme Repairs", "Northampton NN1 1AA"],
+    instructions: "Use a tracked service.",
+    downloadUrl: "https://acme.myshopify.com/apps/repairs/tickets/42/postage-slip?expires=1&token=x",
+    sendNumber: 1,
+  };
+  const pdf = { filename: "repair-42-postage-slip.pdf", content: new Uint8Array([37, 80, 68, 70]), contentType: "application/pdf" };
+
+  it("sends the customer email with the postage slip attached, once per send number", async () => {
+    const attachments = vi.fn(async () => [pdf]);
+    ctx.deps = { ...ctx.deps, attachments };
+    expect((await emit("item_requested", requested)).map((d) => d.channel)).toEqual(["email"]);
+    await emit("item_requested", requested); // a repeat: no second delivery
+    await deliverAll();
+    expect(ctx.email.sent).toHaveLength(1);
+    expect(ctx.email.sent[0]).toMatchObject({
+      to: ["a@example.com"],
+      subject: "Send your Boot to us (repair #42)",
+      attachments: [pdf],
+      idempotencyKey: "acme.myshopify.com:email:item_requested:ticket_42:1",
+    });
+    expect(attachments).toHaveBeenCalledTimes(1);
+
+    await emit("item_requested", { ...requested, sendNumber: 2 }); // "Resend postage email"
+    await deliverAll();
+    expect(ctx.email.sent.map((m) => m.idempotencyKey)).toEqual([
+      "acme.myshopify.com:email:item_requested:ticket_42:1",
+      "acme.myshopify.com:email:item_requested:ticket_42:2",
+    ]);
+  });
+
+  it("goes without the file when no attachments dependency is wired", async () => {
+    await emit("item_requested", requested);
+    await deliverAll();
+    expect(ctx.email.sent[0].attachments).toBeUndefined();
+  });
+
+  it("marks the delivery failed when the slip can't be made", async () => {
+    ctx.deps = {
+      ...ctx.deps,
+      attachments: async () => {
+        throw new DeliveryError("Add the workshop address", false);
+      },
+    };
+    const [delivery] = await emit("item_requested", requested);
+    await deliverAll();
+    expect(ctx.store.all().find((d) => d.id === delivery.id)).toMatchObject({ status: "failed", error: "Add the workshop address" });
+    expect(ctx.email.sent).toHaveLength(0);
+  });
+
+  it("never asks for attachments for other emails", async () => {
+    const attachments = vi.fn(async () => [pdf]);
+    ctx.deps = { ...ctx.deps, attachments };
+    await emit("item_received", { ticketId: 42, productTitle: "Boot", customerName: "Sarah" });
+    await deliverAll();
+    expect(ctx.email.sent[0]).toMatchObject({ subject: "We've received your Boot (repair #42)" });
+    expect(ctx.email.sent[0].attachments).toBeUndefined();
+    expect(attachments).not.toHaveBeenCalled();
+  });
+
+  it("each has its own toggle", async () => {
+    ctx.settings.current = buildSettings({ emails: { send_item: { enabled: false }, item_received: { enabled: false } } });
+    expect(await emit("item_requested", requested)).toEqual([]);
+    expect(await emit("item_received", { ticketId: 42, productTitle: "Boot" })).toEqual([]);
+  });
+});

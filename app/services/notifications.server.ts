@@ -27,6 +27,7 @@
 import {
   EmailDeliveryError,
   sendEmail as defaultSendEmail,
+  type EmailAttachment,
   type EmailMessage,
 } from "./email.server";
 import { DeliveryError } from "./notifications/delivery-error.server";
@@ -85,6 +86,13 @@ export interface NotificationDeps {
     email: string,
     options: { marketing: boolean },
   ): Promise<boolean>;
+  /**
+   * The files a customer email carries when its event names an `attachment`
+   * (the postage slip; repairs/postage-slip.server.ts). Throw a non-retryable
+   * DeliveryError when the file can't be made. Without this dependency the
+   * email goes out without the file (its download link still works).
+   */
+  attachments?(delivery: NotificationDelivery): Promise<EmailAttachment[]>;
   sendEmail?: (message: EmailMessage) => Promise<{ id: string }>;
   fetch?: typeof fetch;
   /** Defaults to app/lib/background.server.ts `enqueue`. */
@@ -365,6 +373,11 @@ async function sendShopEmail(
       ? customerEmail || settings.supportEmail
       : settings.supportEmail;
 
+  const attachments =
+    delivery.channel === "email" && EVENTS[delivery.event].attachment && deps.attachments
+      ? await deps.attachments(delivery)
+      : [];
+
   const send = deps.sendEmail ?? defaultSendEmail;
   const result = await send({
     shopId: delivery.shopId,
@@ -376,6 +389,7 @@ async function sendShopEmail(
     // Provider idempotency keys are account-wide, so scope them to shop and channel.
     idempotencyKey: `${delivery.shopId}:${delivery.channel}:${delivery.idempotencyKey}`,
     headers: Object.keys(headers).length ? headers : undefined,
+    ...(attachments.length ? { attachments } : {}),
   });
   return { sent: true, providerMessageId: result.id };
 }

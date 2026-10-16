@@ -26,6 +26,8 @@ export interface EmailContent {
 export interface EmailData {
   repair_received: EventData["repair_submitted"];
   repair_status_changed: EventData["repair_status_changed"];
+  send_item: EventData["item_requested"];
+  item_received: EventData["item_received"];
   care_welcome: EventData["care_activated"];
   care_credit_issued: EventData["care_credit_offer"];
   care_offer: EventData["care_offer"];
@@ -172,7 +174,7 @@ const STATUS_COPY = {
     subject: "We're assessing your {{product}} (repair #{{ticket_number}})",
     heading: "We're assessing your repair",
     intro:
-      "Your {{product}} has arrived and our team is taking a look. We'll be in touch if anything needs your approval.",
+      "Our team is looking at your repair request for your {{product}}. We'll be in touch if anything needs your approval.",
     label: "Being assessed",
   },
   in_repair: {
@@ -269,6 +271,42 @@ export const TEMPLATES: { [K in EmailKind]: Template<K> } = {
       ["Repair number", `#${d.ticketId}`],
       ["Product", d.productTitle],
       ["Status", statusCopy(d.status).label],
+    ],
+    button: (d) => ({ label: "View your repair", url: d.statusUrl }),
+  },
+  send_item: {
+    defaultSubject: () => "Send your {{product}} to us (repair #{{ticket_number}})",
+    defaultIntro: () =>
+      "Hi {{first_name}}, we're ready for your {{product}}. Print the attached postage slip, stick the label on your parcel and put the packing slip inside, then post it to the address below.",
+    heading: () => "Send your item to us",
+    vars: (d) => ({
+      ticket_number: String(d.ticketId),
+      product: d.productTitle,
+      customer_name: d.customerName ?? "",
+      first_name: greetingName(d.customerName) || "there",
+    }),
+    details: (d) => [
+      ["Repair number", `#${d.ticketId}`],
+      ["Product", d.productTitle],
+      ["Send it to", d.workshopAddress.join("\n")],
+    ],
+    button: (d) => ({ label: "Download postage slip", url: d.downloadUrl }),
+    outro: (d) => d.instructions,
+  },
+  item_received: {
+    defaultSubject: () => "We've received your {{product}} (repair #{{ticket_number}})",
+    defaultIntro: () =>
+      "Hi {{first_name}}, your {{product}} has arrived at our workshop. We'll let you know when work on it starts.",
+    heading: () => "We've received your item",
+    vars: (d) => ({
+      ticket_number: String(d.ticketId),
+      product: d.productTitle,
+      customer_name: d.customerName ?? "",
+      first_name: greetingName(d.customerName) || "there",
+    }),
+    details: (d) => [
+      ["Repair number", `#${d.ticketId}`],
+      ["Product", d.productTitle],
     ],
     button: (d) => ({ label: "View your repair", url: d.statusUrl }),
   },
@@ -564,7 +602,10 @@ ${footerLines}
     details.length
       ? "\n" +
         details
-          .map(([label, value]) => `${`${label}:`.padEnd(width + 2)}${value}`)
+          .map(
+            ([label, value]) =>
+              `${`${label}:`.padEnd(width + 2)}${value.replace(/\n/g, `\n${" ".repeat(width + 2)}`)}`,
+          )
           .join("\n")
       : null,
     button && buttonUrl ? `\n${button.label}: ${buttonUrl}` : null,

@@ -207,6 +207,70 @@ Sent by ShopCare on behalf of Acme Boots.
 "
 `;
 
+exports[`email templates > item_received matches its snapshot > html 1`] = `
+"<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>We&#39;ve received your Chelsea Boot (repair #42)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f4;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Hi Sarah, your Chelsea Boot has arrived at our workshop. We&#39;ll let you know when work on it starts.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border:1px solid #e3e3e3;border-radius:8px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+<tr><td style="padding:24px 32px;border-bottom:3px solid #bd4a27;"><a href="https://acme.example/" style="text-decoration:none;color:#1f1f1f;"><img src="https://cdn.example.com/acme-logo.png" alt="Acme Boots" height="40" style="display:block;height:40px;width:auto;max-width:200px;border:0;"></a></td></tr>
+<tr><td style="padding:32px 32px 8px;">
+<h1 style="margin:0 0 16px;font-size:24px;line-height:1.3;color:#1f1f1f;">We&#39;ve received your item</h1>
+<p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1f1f1f;">Hi Sarah, your Chelsea Boot has arrived at our workshop. We&#39;ll let you know when work on it starts.</p>
+</td></tr>
+<tr><td style="padding:0 32px 24px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e3e3e3;">
+<tr><th scope="row" align="left" valign="top" style="padding:10px 12px 10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;font-weight:600;color:#5c5c5c;width:40%;">Repair number</th><td valign="top" style="padding:10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;color:#1f1f1f;">#42</td></tr>
+<tr><th scope="row" align="left" valign="top" style="padding:10px 12px 10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;font-weight:600;color:#5c5c5c;width:40%;">Product</th><td valign="top" style="padding:10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;color:#1f1f1f;">Chelsea Boot</td></tr>
+</table></td></tr>
+<tr><td style="padding:0 32px 24px;">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:6px;background:#bd4a27;">
+<a href="https://acme.example/apps/repairs/tickets/42" style="display:inline-block;padding:12px 24px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">View your repair</a>
+</td></tr></table></td></tr>
+<tr><td style="padding:24px 32px;border-top:1px solid #e3e3e3;font-size:12px;line-height:1.5;color:#5c5c5c;">
+<p style="margin:0 0 4px;font-weight:600;">Acme Boots</p>
+<p style="margin:0 0 12px;">1 Cobbler Lane<br>Northampton NN1 1AA<br>United Kingdom</p>
+<p style="margin:0;">Sent by ShopCare on behalf of Acme Boots.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+"
+`;
+
+exports[`email templates > item_received matches its snapshot > subject 1`] = `"We've received your Chelsea Boot (repair #42)"`;
+
+exports[`email templates > item_received matches its snapshot > text 1`] = `
+"Acme Boots
+
+We've received your item
+
+Hi Sarah, your Chelsea Boot has arrived at our workshop. We'll let you know when work on it starts.
+
+Repair number: #42
+Product:       Chelsea Boot
+
+View your repair: https://acme.example/apps/repairs/tickets/42
+
+--
+Acme Boots
+1 Cobbler Lane
+Northampton NN1 1AA
+United Kingdom
+Sent by ShopCare on behalf of Acme Boots.
+"
+`;
+
 exports[`email templates > repair status assessing has its own subject and heading 1`] = `
 {
   "firstLines": [
@@ -214,7 +278,7 @@ exports[`email templates > repair status assessing has its own subject and headi
     "",
     "We're assessing your repair",
     "",
-    "Your Chelsea Boot has arrived and our team is taking a look. We'll be in touch if anything needs your approval.",
+    "Our team is looking at your repair request for your Chelsea Boot. We'll be in touch if anything needs your approval.",
   ],
   "subject": "We're assessing your Chelsea Boot (repair #42)",
 }
@@ -313,7 +377,7 @@ Hi Sarah, thanks for your repair request for your Chelsea Boot. We'll review it 
 Repair number:    #42
 Product:          Chelsea Boot
 What you told us: Heel worn down
-Left boot only
+                  Left boot only
 
 View your repair: https://acme.example/apps/repairs/tickets/42
 
@@ -382,6 +446,78 @@ Product:       Chelsea Boot
 Status:        Ready
 
 View your repair: https://acme.example/apps/repairs/tickets/42
+
+--
+Acme Boots
+1 Cobbler Lane
+Northampton NN1 1AA
+United Kingdom
+Sent by ShopCare on behalf of Acme Boots.
+"
+`;
+
+exports[`email templates > send_item matches its snapshot > html 1`] = `
+"<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Send your Chelsea Boot to us (repair #42)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f4;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Hi Sarah, we&#39;re ready for your Chelsea Boot. Print the attached postage slip, stick the label on your parcel and put the packing slip inside, then post it to the address below.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border:1px solid #e3e3e3;border-radius:8px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+<tr><td style="padding:24px 32px;border-bottom:3px solid #bd4a27;"><a href="https://acme.example/" style="text-decoration:none;color:#1f1f1f;"><img src="https://cdn.example.com/acme-logo.png" alt="Acme Boots" height="40" style="display:block;height:40px;width:auto;max-width:200px;border:0;"></a></td></tr>
+<tr><td style="padding:32px 32px 8px;">
+<h1 style="margin:0 0 16px;font-size:24px;line-height:1.3;color:#1f1f1f;">Send your item to us</h1>
+<p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1f1f1f;">Hi Sarah, we&#39;re ready for your Chelsea Boot. Print the attached postage slip, stick the label on your parcel and put the packing slip inside, then post it to the address below.</p>
+</td></tr>
+<tr><td style="padding:0 32px 24px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e3e3e3;">
+<tr><th scope="row" align="left" valign="top" style="padding:10px 12px 10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;font-weight:600;color:#5c5c5c;width:40%;">Repair number</th><td valign="top" style="padding:10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;color:#1f1f1f;">#42</td></tr>
+<tr><th scope="row" align="left" valign="top" style="padding:10px 12px 10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;font-weight:600;color:#5c5c5c;width:40%;">Product</th><td valign="top" style="padding:10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;color:#1f1f1f;">Chelsea Boot</td></tr>
+<tr><th scope="row" align="left" valign="top" style="padding:10px 12px 10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;font-weight:600;color:#5c5c5c;width:40%;">Send it to</th><td valign="top" style="padding:10px 0;border-bottom:1px solid #e3e3e3;font-size:14px;color:#1f1f1f;">Acme Repairs<br>4 Cobbler&#39;s Yard<br>Northampton NN1 1AA<br>United Kingdom</td></tr>
+</table></td></tr>
+<tr><td style="padding:0 32px 24px;">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:6px;background:#bd4a27;">
+<a href="https://acme.myshopify.com/apps/repairs/tickets/42/postage-slip?expires=1793000000&amp;token=abc" style="display:inline-block;padding:12px 24px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">Download postage slip</a>
+</td></tr></table></td></tr>
+<tr><td style="padding:0 32px 24px;"><p style="margin:0;font-size:16px;line-height:1.5;color:#1f1f1f;">Pack your item securely and use a tracked service. Put the packing slip inside the parcel.</p></td></tr>
+<tr><td style="padding:24px 32px;border-top:1px solid #e3e3e3;font-size:12px;line-height:1.5;color:#5c5c5c;">
+<p style="margin:0 0 4px;font-weight:600;">Acme Boots</p>
+<p style="margin:0 0 12px;">1 Cobbler Lane<br>Northampton NN1 1AA<br>United Kingdom</p>
+<p style="margin:0;">Sent by ShopCare on behalf of Acme Boots.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+"
+`;
+
+exports[`email templates > send_item matches its snapshot > subject 1`] = `"Send your Chelsea Boot to us (repair #42)"`;
+
+exports[`email templates > send_item matches its snapshot > text 1`] = `
+"Acme Boots
+
+Send your item to us
+
+Hi Sarah, we're ready for your Chelsea Boot. Print the attached postage slip, stick the label on your parcel and put the packing slip inside, then post it to the address below.
+
+Repair number: #42
+Product:       Chelsea Boot
+Send it to:    Acme Repairs
+               4 Cobbler's Yard
+               Northampton NN1 1AA
+               United Kingdom
+
+Download postage slip: https://acme.myshopify.com/apps/repairs/tickets/42/postage-slip?expires=1793000000&token=abc
+
+Pack your item securely and use a tracked service. Put the packing slip inside the parcel.
 
 --
 Acme Boots

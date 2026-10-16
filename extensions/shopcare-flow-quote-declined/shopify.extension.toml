@@ -1,0 +1,34 @@
+# Shopify Flow trigger (staff alert): a customer declined their repair quote
+# from its review page (with an optional reason). Its invoice no longer works.
+[[extensions]]
+name = "Repair quote declined"
+uid = "685b19bc-ba93-4c02-9530-f129fe9dd28f1aff0ae4"
+type = "flow_trigger"
+handle = "shopcare-quote-declined"
+description = "A customer declined their repair quote."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Ticket number"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Product title"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Customer name"
+
+    [[settings.fields]]
+    type = "email"
+    key = "Customer email"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Quote total"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Reason"

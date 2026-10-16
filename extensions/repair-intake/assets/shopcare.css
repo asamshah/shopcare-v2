@@ -1,0 +1,258 @@
+/* ShopCare storefront blocks (Care offer, add Care later, repair status).
+   No colours of their own: text, borders and panels are mixed from
+   currentColor, so the blocks follow whatever colour scheme the theme gives
+   the section (light, dark, per-section schemes). Fonts and sizes inherit.
+   Where a Dawn-family theme exposes its scheme as RGB variables, the selected
+   state uses its button colour; elsewhere it falls back to currentColor.
+   Buttons also carry the theme's own `button` class. Selectors are single
+   classes or :where(), so a theme's own rules win. */
+
+.shopcare,
+.shopcare-pdp {
+  /* The block's "Selected colour" setting, else the theme's button colour.
+     If neither exists this is invalid, and var(--shopcare-accent, …) falls back. */
+  --shopcare-accent: var(--shopcare-accent-setting, rgb(var(--color-button)));
+  --shopcare-line: color-mix(in srgb, currentColor 20%, transparent);
+  --shopcare-line-strong: color-mix(in srgb, currentColor 45%, transparent);
+  --shopcare-panel: color-mix(in srgb, currentColor 6%, transparent);
+  --shopcare-muted: color-mix(in srgb, currentColor 80%, transparent);
+  /* A red pulled towards the text colour: darker on light schemes, lighter on
+     dark ones, so it keeps its contrast either way. Themes can set --shopcare-error. */
+  --shopcare-error-color: var(--shopcare-error, color-mix(in srgb, #d72c0d 70%, currentColor));
+  --shopcare-radius: var(--text-boxes-radius, 0.75em);
+}
+
+.shopcare[hidden],
+.shopcare [hidden],
+.shopcare-pdp[hidden],
+.shopcare-pdp [hidden] {
+  display: none !important;
+}
+
+.shopcare {
+  margin-block: 1em;
+  padding: 1em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: var(--shopcare-radius);
+}
+
+.shopcare__hint {
+  color: var(--shopcare-muted);
+}
+
+/* Not colour alone: a bar on the leading edge, and role="alert" in the markup. */
+.shopcare__error,
+.shopcare-pdp__error {
+  margin-block: 0.75em 0;
+  padding-inline-start: 0.75em;
+  border-inline-start: 3px solid;
+  color: var(--shopcare-error-color);
+}
+
+.shopcare__list {
+  display: grid;
+  gap: 0.75em;
+}
+
+.shopcare__item {
+  display: grid;
+  gap: 0.5em;
+  padding: 0.75em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: var(--shopcare-radius);
+}
+
+/* Repair status: the cover the repair was raised under, in the same style as
+   the request form's badges (Care filled, warranty outlined). */
+.shopcare__badge {
+  justify-self: start;
+  padding: 0.15em 0.6em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: 0.75em;
+  font-size: 0.85em;
+}
+
+.shopcare__badge--care {
+  border-color: var(--shopcare-accent, currentColor);
+  background: color-mix(in srgb, var(--shopcare-accent, currentColor) 12%, transparent);
+}
+
+.shopcare__badge--warranty {
+  background: var(--shopcare-panel);
+}
+
+.shopcare__badge-detail {
+  color: var(--shopcare-muted);
+  font-size: 0.85em;
+}
+
+.shopcare__item-plan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75em;
+  flex-wrap: wrap;
+}
+
+/* Fallback for themes without a `button` class: an outlined button in the
+   text colour. Zero specificity, so the theme's .button wins. */
+:where(.shopcare__button) {
+  display: inline-block;
+  padding: 0.5em 1em;
+  border: 1px solid currentColor;
+  border-radius: var(--buttons-radius, 0.375em);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+:where(.shopcare__button:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ───────── Product page (Care offer) ───────── */
+.shopcare-pdp {
+  margin-block: 1.5em;
+}
+
+.shopcare-pdp__title {
+  margin-block: 0 0.75em;
+}
+
+.shopcare-pdp__title-muted {
+  color: var(--shopcare-muted);
+}
+
+.shopcare-pdp__choices {
+  display: grid;
+  gap: 0.75em;
+}
+
+.shopcare-pdp__card {
+  display: grid;
+  gap: 0.35em;
+  padding: 1em 1.25em;
+  border: 1px solid;
+  border-color: var(--shopcare-line-strong);
+  border-radius: var(--shopcare-radius);
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.shopcare-pdp__card:hover {
+  border-color: currentColor;
+}
+
+.shopcare-pdp__card:focus-visible {
+  outline: 2px solid var(--shopcare-accent, currentColor);
+  outline-offset: 2px;
+}
+
+.shopcare-pdp__card[aria-checked="true"] {
+  border-color: var(--shopcare-accent, currentColor);
+  box-shadow: 0 0 0 1px var(--shopcare-accent, currentColor);
+}
+
+.shopcare-pdp__card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-weight: bolder;
+}
+
+.shopcare-pdp__card-text {
+  color: var(--shopcare-muted);
+}
+
+.shopcare-pdp__icon {
+  width: 1.1em;
+  height: 1.1em;
+  flex: none;
+  fill: currentColor;
+  color: var(--shopcare-accent, inherit);
+}
+
+.shopcare-pdp__rule {
+  width: 100%;
+  margin-block: 0.75em 0.5em;
+  border: 0;
+  border-block-start: 1px solid;
+  border-color: var(--shopcare-line);
+}
+
+.shopcare-pdp__benefits {
+  display: grid;
+  gap: 0.5em;
+  margin: 0;
+  padding-inline-start: 1.1em;
+}
+
+.shopcare-pdp__how {
+  margin-block-start: 0.75em;
+  padding: 1em 1.25em;
+  border-radius: var(--shopcare-radius);
+  background: var(--shopcare-panel);
+}
+
+.shopcare-pdp__how summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.shopcare-pdp__how summary::-webkit-details-marker {
+  display: none;
+}
+
+.shopcare-pdp__plus {
+  font-size: 1.3em;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.shopcare-pdp__how[open] .shopcare-pdp__plus {
+  transform: rotate(45deg);
+}
+
+.shopcare-pdp__how p {
+  margin-block: 0.75em 0;
+  font-size: 0.9em;
+  color: var(--shopcare-muted);
+}
+
+/* Server-rendered placeholders while the plans load (see care_offer.liquid). */
+.shopcare-pdp__skeleton {
+  min-height: 14em;
+  border-radius: var(--shopcare-radius);
+  background: var(--shopcare-panel);
+  animation: shopcare-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.shopcare-pdp__skeleton--short {
+  min-height: 3.5em;
+}
+
+@keyframes shopcare-pulse {
+  to { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shopcare-pdp__skeleton {
+    animation: none;
+  }
+
+  .shopcare-pdp__card,
+  .shopcare-pdp__plus {
+    transition: none;
+  }
+}

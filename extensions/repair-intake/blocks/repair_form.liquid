@@ -1,0 +1,25 @@
+{%- comment -%}
+  Repair request — a page block (e.g. a "Repairs" page): choose the item, describe the issue, add photos.
+  The form lives in snippets/shopcare_request_form.liquid.
+{%- endcomment -%}
+
+<div {{ block.shopify_attributes }}>
+  {% render 'shopcare_request_form', block: block, customer: customer, app: app %}
+</div>
+
+
+{% schema %}
+{
+  "name": "Repair request",
+  "target": "section",
+  "stylesheet": "repair-intake.css",
+  "javascript": "repair-intake.js",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Request a repair" },
+    { "type": "textarea", "id": "confirmation_text", "label": "Confirmation message", "default": "Your repair request has been received. We'll be in touch shortly." },
+    { "type": "checkbox", "id": "collect_address", "label": "Collect return address", "default": true },
+    { "type": "range", "id": "max_images", "label": "Max photos", "min": 0, "max": 10, "step": 1, "default": 6 },
+    { "type": "url", "id": "status_url", "label": "Repair status page", "info": "The page with the Repair status block. Linked from the confirmation." }
+  ]
+}
+{% endschema %}

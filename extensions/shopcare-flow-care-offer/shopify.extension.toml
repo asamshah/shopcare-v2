@@ -1,0 +1,33 @@
+# Shopify Flow trigger: fired when an order is paid with products that could
+# still have Care added. Add a wait step in Flow to send the reminder later.
+[[extensions]]
+name = "Care offer available"
+uid = "2e391754-ebd0-70c4-48b5-55a0697fca6a55c3de4b"
+type = "flow_trigger"
+handle = "shopcare-care-offer"
+description = "A customer bought products without Care and can still add it."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "customer_reference"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Product title"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Care plan"
+
+    [[settings.fields]]
+    type = "number_decimal"
+    key = "Care price"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Offer ends"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Add Care URL"

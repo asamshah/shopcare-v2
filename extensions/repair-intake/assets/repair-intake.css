@@ -1,0 +1,542 @@
+/* Repair request form and its app-embed button. Like shopcare.css: no colours
+   of its own (everything is mixed from currentColor), fonts inherit, the
+   theme's `button` / `link` classes style the controls, and ShopCare's own
+   fallbacks sit in :where() so the theme's rules win. */
+
+.repair-intake,
+.shopcare-launcher {
+  /* The theme's button colours (Dawn family), else invalid → fallbacks below. */
+  --shopcare-accent: rgb(var(--color-button));
+  --shopcare-on-accent: rgb(var(--color-button-text));
+  --shopcare-line: color-mix(in srgb, currentColor 20%, transparent);
+  --shopcare-line-strong: color-mix(in srgb, currentColor 45%, transparent);
+  --shopcare-panel: color-mix(in srgb, currentColor 6%, transparent);
+  --shopcare-muted: color-mix(in srgb, currentColor 80%, transparent);
+  /* See shopcare.css: a red pulled towards the text colour. */
+  --shopcare-error-color: var(--shopcare-error, color-mix(in srgb, #d72c0d 70%, currentColor));
+  --shopcare-radius: var(--text-boxes-radius, 0.5em);
+}
+
+.repair-intake {
+  width: 100%;
+}
+
+/* Panels/cards use display:grid|flex which overrides the `hidden` attribute —
+   force hidden elements to stay hidden (fixes "all steps showing at once"). */
+.repair-intake [hidden] {
+  display: none !important;
+}
+
+.repair-intake__heading {
+  margin-block: 0 0.5em;
+}
+
+.repair-intake__form,
+.repair-intake__panel {
+  display: grid;
+  gap: 1em;
+}
+
+.repair-intake__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: end; /* fields line up even if one label wraps */
+  gap: 1em;
+}
+
+@media (max-width: 600px) {
+  .repair-intake__row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.repair-intake__label {
+  display: grid;
+  gap: 0.25em;
+}
+
+.repair-intake__subheading {
+  margin-block: 0;
+  font-size: 1.1em;
+}
+
+/* For screen readers only (the search's result count). */
+.repair-intake__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Inputs: transparent, in the text colour, with a hairline mixed from it. */
+:where(.repair-intake) :where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="hidden"]), textarea, select) {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.6em 0.75em;
+  border: 1px solid;
+  border-color: var(--shopcare-line-strong);
+  border-radius: var(--inputs-radius, 0.375em);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+:where(.repair-intake) :where(input, textarea, select):focus-visible {
+  outline: 2px solid var(--shopcare-accent, currentColor);
+  outline-offset: 1px;
+}
+
+:where(.repair-intake) :where(input[type="checkbox"]) {
+  accent-color: var(--shopcare-accent, auto);
+}
+
+:where(.repair-intake) :where(input[type="file"]) {
+  color: inherit;
+  font: inherit;
+}
+
+.repair-intake__fieldset {
+  display: grid;
+  gap: 0.75em;
+  margin: 0;
+  padding: 1em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: var(--shopcare-radius);
+}
+
+.repair-intake__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.repair-intake__checkbox--inline {
+  align-self: end;
+}
+
+.repair-intake__hint {
+  color: var(--shopcare-muted);
+}
+
+/* Buttons: the theme's `button` class does the styling. Without one, primary
+   buttons fill with the theme's button colours if it has them, else outline. */
+:where(.repair-intake__submit, .repair-intake__back, .repair-intake__secondary, .repair-intake__choice) {
+  padding: 0.75em 1.5em;
+  border: 1px solid currentColor;
+  border-radius: var(--buttons-radius, 0.375em);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+:where(.repair-intake__submit, .repair-intake__choice:first-child) {
+  border-color: var(--shopcare-accent, currentColor);
+  background-color: var(--shopcare-accent, transparent);
+  color: var(--shopcare-on-accent, inherit);
+}
+
+:where(.repair-intake__submit[disabled], .repair-intake__back[disabled], .repair-intake__secondary[disabled]) {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.repair-intake__submit {
+  justify-self: start;
+}
+
+:where(.repair-intake__link) {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.repair-intake__link,
+.repair-intake__secondary {
+  justify-self: start;
+}
+
+/* Status line: success is a neutral panel; errors take the error colour plus
+   a leading bar, so they don't rely on colour alone (and role="status"). */
+.repair-intake__status {
+  padding: 0.75em 1em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: var(--shopcare-radius);
+}
+
+.repair-intake__status--ok {
+  background: var(--shopcare-panel);
+}
+
+.repair-intake__status--error {
+  border-color: currentColor;
+  border-inline-start-width: 4px;
+  color: var(--shopcare-error-color);
+}
+
+/* --- Start (logged out): log in, or continue without an account --- */
+.repair-intake__start {
+  display: grid;
+  gap: 0.75em;
+}
+
+.repair-intake__start p {
+  margin: 0;
+}
+
+.repair-intake__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75em;
+}
+
+:where(.repair-intake__choice) {
+  text-align: center;
+  text-decoration: none;
+}
+
+/* --- Profile and products (logged in) --- */
+.repair-intake__profile {
+  display: grid;
+  gap: 0.2em;
+  padding: 0.75em 1em;
+  border-radius: var(--shopcare-radius);
+  background: var(--shopcare-panel);
+}
+
+.repair-intake__history,
+.repair-intake__find {
+  display: grid;
+  gap: 0.75em;
+}
+
+.repair-intake__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10em, 1fr));
+  gap: 0.75em;
+}
+
+.repair-intake__card {
+  display: grid;
+  align-content: start;
+  gap: 0.4em;
+  padding: 0.75em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: var(--shopcare-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.repair-intake__card:hover {
+  border-color: currentColor;
+}
+
+/* A repair is already open for it: shown, but can't be chosen. */
+.repair-intake__card[aria-disabled="true"] {
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.repair-intake__card[aria-disabled="true"] > :not(.repair-intake__badge--open) {
+  opacity: 0.6;
+}
+
+.repair-intake__card:focus-visible {
+  outline: 2px solid var(--shopcare-accent, currentColor);
+  outline-offset: 2px;
+}
+
+.repair-intake__card-img,
+.repair-intake__selected-img {
+  object-fit: cover;
+  border-radius: var(--shopcare-radius);
+  background: var(--shopcare-panel);
+}
+
+.repair-intake__card-img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
+
+.repair-intake__card-title {
+  font-weight: bolder;
+}
+
+.repair-intake__card-sub {
+  font-size: 0.9em;
+  color: var(--shopcare-muted);
+}
+
+.repair-intake__selected {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0.75em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: var(--shopcare-radius);
+}
+
+.repair-intake__selected-img {
+  width: 56px;
+  height: 56px;
+}
+
+.repair-intake__selected-meta {
+  display: grid;
+  gap: 0.2em;
+  flex: 1;
+}
+
+/* Cover and repair badges. Care is filled, warranty outlined, no cover muted;
+   each says what it is in words, so none relies on colour. */
+.repair-intake__badge {
+  justify-self: start;
+  padding: 0.15em 0.6em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: 0.75em; /* stays a rounded box if the text wraps */
+  font-size: 0.85em;
+}
+
+.repair-intake__badge--care {
+  border-color: var(--shopcare-accent, currentColor);
+  background: color-mix(in srgb, var(--shopcare-accent, currentColor) 12%, transparent);
+}
+
+.repair-intake__badge--warranty {
+  background: var(--shopcare-panel);
+}
+
+.repair-intake__badge--none {
+  border-style: dashed;
+  color: var(--shopcare-muted);
+}
+
+.repair-intake__badge--open {
+  border-color: currentColor;
+  font-weight: bolder;
+}
+
+/* --- Find the product you bought: combobox --- */
+.repair-intake__listbox {
+  display: grid;
+  max-height: 20em;
+  margin: 0;
+  padding: 0.25em;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid;
+  border-color: var(--shopcare-line-strong);
+  border-radius: var(--inputs-radius, 0.375em);
+}
+
+.repair-intake__option {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.5em 0.6em;
+  border-radius: calc(var(--inputs-radius, 0.375em) * 0.75);
+  cursor: pointer;
+}
+
+.repair-intake__option:hover,
+.repair-intake__option[aria-selected="true"] {
+  background: var(--shopcare-panel);
+  outline: 1px solid var(--shopcare-line-strong);
+}
+
+.repair-intake__option-img {
+  flex: none;
+  width: 2.5em;
+  height: 2.5em;
+  object-fit: cover;
+  border-radius: calc(var(--shopcare-radius) / 2);
+}
+
+.repair-intake__lookup {
+  display: grid;
+  gap: 0.75em;
+  padding: 1em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: var(--shopcare-radius);
+}
+
+.repair-intake__manual {
+  display: grid;
+  gap: 1em;
+}
+
+/* --- Wizard steps --- */
+.repair-intake__steps {
+  display: flex;
+  gap: 0.5em;
+  margin-block: 0 1.5em;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.repair-intake__step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding-block-end: 0.5em;
+  border-block-end: 2px solid;
+  border-color: var(--shopcare-line);
+  color: var(--shopcare-muted);
+  font-size: 0.9em;
+}
+
+.repair-intake__step::before {
+  counter-increment: step;
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.6em;
+  height: 1.6em;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 0.9em;
+}
+
+.repair-intake__step.is-active {
+  border-color: var(--shopcare-accent, currentColor);
+  color: inherit;
+}
+
+.repair-intake__step.is-active::before {
+  border-color: var(--shopcare-accent, currentColor);
+  background-color: var(--shopcare-accent, transparent);
+  color: var(--shopcare-on-accent, inherit);
+}
+
+.repair-intake__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75em;
+  margin-block-start: 0.5em;
+}
+
+.repair-intake__actions .repair-intake__submit {
+  margin-inline-start: auto;
+}
+
+.repair-intake__confirmation {
+  padding: 2em 1em;
+  border: 1px solid;
+  border-color: var(--shopcare-line);
+  border-radius: var(--shopcare-radius);
+  background: var(--shopcare-panel);
+  text-align: center;
+}
+
+.repair-intake__confirmation h3 {
+  margin-block: 0 0.5em;
+}
+
+/* Status tracker: Requested → Quoted → In repair → Returned. */
+.repair-intake__tracker {
+  display: flex;
+  gap: 0.5em;
+  margin-block: 1.5em 1em;
+  padding: 0;
+  list-style: none;
+  text-align: start;
+}
+
+.repair-intake__tracker-step {
+  flex: 1;
+  padding-block-start: 0.5em;
+  border-block-start: 3px solid;
+  border-color: var(--shopcare-line);
+  color: var(--shopcare-muted);
+  font-size: 0.9em;
+}
+
+.repair-intake__tracker-step.is-active {
+  border-color: var(--shopcare-accent, currentColor);
+  color: inherit;
+  font-weight: bolder;
+}
+
+/* --- App embed: floating button + dialog --- */
+.shopcare-launcher {
+  /* The dialog sits in the top layer, outside the page's colours: give it the
+     theme's background and text (Dawn family), else the browser's own pair. */
+  --shopcare-surface: rgb(var(--color-background));
+  --shopcare-text: rgb(var(--color-foreground));
+}
+
+/* Position needs real specificity: it must survive the theme's .button. */
+.shopcare-launcher .shopcare-launcher__button {
+  position: fixed;
+  inset-block-end: 1.25rem;
+  z-index: 50;
+}
+
+.shopcare-launcher--bottom-right .shopcare-launcher__button {
+  inset-inline-end: 1.25rem;
+}
+
+.shopcare-launcher--bottom-left .shopcare-launcher__button {
+  inset-inline-start: 1.25rem;
+}
+
+/* It floats over any content, so the fallback is filled: theme button colours,
+   else the browser's Canvas/CanvasText pair (always legible together). */
+:where(.shopcare-launcher__button) {
+  padding: 0.75em 1.1em;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background-color: var(--shopcare-accent, Canvas);
+  color: var(--shopcare-on-accent, CanvasText);
+  font: inherit;
+  cursor: pointer;
+}
+
+.shopcare-launcher__dialog {
+  width: min(40rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  padding: 1.5em;
+  border: 0;
+  border-radius: var(--popup-corner-radius, 0.75em);
+  overflow: auto;
+  background-color: var(--shopcare-surface, Canvas);
+  color: var(--shopcare-text, CanvasText);
+}
+
+.shopcare-launcher__dialog::backdrop {
+  background: color-mix(in srgb, CanvasText 45%, transparent);
+}
+
+.shopcare-launcher__close {
+  float: right;
+  float: inline-end;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.5em;
+  line-height: 1;
+  cursor: pointer;
+}

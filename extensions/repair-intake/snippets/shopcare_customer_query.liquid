@@ -1,0 +1,15 @@
+{%- comment -%}
+  The logged-in customer's signed token, as a query string for App Proxy URLs:
+    customer_id=…&customer_ts=…&customer_sig=…
+  Nothing for guests, or before the app has published its signing key.
+  Shopify's logged_in_customer_id can be blank on new customer accounts, so the
+  app also accepts this HMAC of "<customer id>:<unix time>" under the shop's
+  secret (an app-data metafield only this app can read). The app verifies it
+  and lets it live 24 hours (Shopify::CustomerToken). Pass `customer` and `app`.
+{%- endcomment -%}
+{%- assign signing_key = app.metafields.shopcare.customer_signing_key.value -%}
+{%- if customer and signing_key != blank -%}
+  {%- assign ts = 'now' | date: '%s' -%}
+  {%- assign message = customer.id | append: ':' | append: ts -%}
+  customer_id={{ customer.id }}&customer_ts={{ ts }}&customer_sig={{ message | hmac_sha256: signing_key }}
+{%- endif -%}

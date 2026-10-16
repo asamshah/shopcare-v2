@@ -1,0 +1,34 @@
+# Shopify Flow trigger (staff alert): a repair quote passed its validity
+# unpaid. Its invoice no longer works; revise and resend it from the ticket.
+# (uid is added by `shopify app deploy`.)
+[[extensions]]
+name = "Repair quote expired"
+type = "flow_trigger"
+handle = "shopcare-quote-expired"
+description = "A repair quote expired without being paid."
+
+  [settings]
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Ticket number"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Product title"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Customer name"
+
+    [[settings.fields]]
+    type = "email"
+    key = "Customer email"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Quote total"
+
+    [[settings.fields]]
+    type = "single_line_text_field"
+    key = "Valid until"

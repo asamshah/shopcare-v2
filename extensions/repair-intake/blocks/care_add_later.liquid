@@ -1,0 +1,46 @@
+{%- comment -%}
+  Add Care to a purchase — for logged-in customers: lists items they've bought
+  that can still have a Care plan added (within each plan's offer window), and
+  adds the plan to the cart tagged with _shopcare_item, so the cover attaches
+  to that item when the order is paid. Link to this page from Care offer emails.
+{%- endcomment -%}
+
+{%- capture customer_query -%}{% render 'shopcare_customer_query', customer: customer, app: app %}{%- endcapture -%}
+<div
+  class="shopcare shopcare--later"
+  data-care-later
+  data-offers-url="/apps/repairs/care_offers{% if customer_query != blank %}?{{ customer_query | escape }}{% endif %}"
+  data-cart-add-url="{{ routes.cart_add_url }}.js"
+  data-cart-url="{{ routes.cart_url }}"
+  {{ block.shopify_attributes }}
+>
+  {%- if block.settings.heading != blank -%}
+    <h2 class="shopcare__title">{{ block.settings.heading }}</h2>
+  {%- endif -%}
+
+  {%- if customer -%}
+    <p class="shopcare__hint" data-care-loading>Loading your purchases…</p>
+    <p class="shopcare__hint" data-care-empty hidden>{{ block.settings.empty_text }}</p>
+    <div class="shopcare__list" data-care-list></div>
+  {%- else -%}
+    <p>
+      <a href="{{ routes.account_login_url }}">{{ block.settings.login_text }}</a>
+    </p>
+  {%- endif -%}
+  <p class="shopcare__error" data-shopcare-error role="alert" hidden></p>
+</div>
+
+
+{% schema %}
+{
+  "name": "Add Care to a purchase",
+  "target": "section",
+  "stylesheet": "shopcare.css",
+  "javascript": "shopcare-pdp.js",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Add Care to something you've bought" },
+    { "type": "text", "id": "empty_text", "label": "No items message", "default": "None of your recent purchases can have Care added right now." },
+    { "type": "text", "id": "login_text", "label": "Log in prompt", "default": "Log in to see which of your purchases can have Care added." }
+  ]
+}
+{% endschema %}

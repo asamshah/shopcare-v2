@@ -209,17 +209,25 @@ TradeInPlan / TradeIn   (V3)
 ## 6. Pricing (draft, to validate with brands)
 
 Two-part pricing: a platform fee that grows with usage, plus a share of Care revenue.
+Proposal of 16-10-2026, replacing the earlier $0 / $29 / $79 idea, which priced ShopCare as a
+ticketing tool. Care plans earn the merchant money, so ShopCare earns with them.
 
 | Plan | Price | Includes |
 |---|---|---|
-| Free | $0 | Up to 10 repairs/mo, so brands can try it and leave reviews |
-| Growth | $49/mo | Up to 100 repairs/mo, warranty rules and registration, branded emails |
-| Pro | $149/mo | Unlimited repairs, workshop inventory, webhooks/API |
-| **Care** | **+10–15% of plan sales** | Care plan builder and product-page block (any paid plan) |
-| Trade-in (V3) | +$99–149/mo | Benchmark: Tern charges ~$299/mo for trade-in alone |
+| Starter | ~$49/mo | Repairs, quotes and warranty, up to ~50 repairs/mo |
+| Growth | ~$149/mo | Unlimited repairs, workshop inventory, ShopCare emails, custom sending domain |
+| Pro | ~$299/mo | Several workshops, outbound webhook, priority support |
+| **Care** | **+5–10% of Care plan sales** | On any plan, billed as Shopify usage charges with a monthly cap |
+| Trade-in (V2+) | +$99–149/mo | Benchmark: Tern charges ~$299/mo for trade-in alone |
 
-**Still to validate:** talk to 5+ brands that offer repairs about what they spend today on
-Odoo, spreadsheets and staff time, and whether they'd accept a revenue share on Care.
+- No free plan: a 14-day trial instead. A free tier mostly brings stores that never pay but
+  still need support.
+- Why higher than before: the market is small (hundreds of realistic customers, not
+  thousands), so each merchant has to pay more; target brands charge £95–220 per repair.
+
+**Still to validate:** in the brand calls, ask what running repairs costs them today (staff
+hours, Odoo or spreadsheets, tools) and what they'd pay, and whether they'd accept a revenue
+share on Care. A partner price for brands referred by a repair workshop is also open.
 
 ---
 
@@ -272,4 +280,7 @@ Odoo, spreadsheets and staff time, and whether they'd accept a revenue share on 
 | 16-10-2026 | **The Shopify invoice is the quote** (supersedes the decision step above): Send quote creates the draft order and Shopify emails its invoice from the store (guests included), with the validity, "Pay to accept" and a decline link to the review page. Paying accepts (`draft → sent → paid`); decline or expiry deletes the draft order; revise deletes it and the revision gets a new one. No Flow/Klaviyo needed for the customer email; Flow triggers **Repair quote paid / declined / expired** are staff alerts (no customer reference) |
 | 16-10-2026 | **Care = full repair cover**: a plan covers every repair for its term except the fixed exclusions (and the merchant's own). Per-service choice, fair-use limits and the "% off non-covered repairs" perk are gone; quotes under Care are free on every line, plus the excess once per repair. Terms read "All repairs to your <product> for <N> years, except: …". Supersedes the 15-10 per-line Care pricing |
 | 16-10-2026 | Pilot stock is shared with production, one workshop, and a spreadsheet is the source of truth: **parts CSV import / export** now (preview before applying; stock counts recorded as `stock_count` movements); Shopify inventory or Google Sheets sync later (§3.3) |
+| 16-10-2026 | **Rewrite from Rails to TypeScript on Netlify** (Shopify's React Router template, Prisma + Postgres on Neon, Netlify Functions / Scheduled / Background functions, Netlify Blobs). The Rails app is frozen at tag `rails-reference` as the spec |
+| 16-10-2026 | **ShopCare sends its own emails** (Resend by default): repair received and status updates, Care welcome and credit codes to customers (guests included); staff alerts to one address. The "Add Care" offer is marketing, sent only with Shopify email marketing consent. Flow triggers and Klaviyo become optional extras. Supersedes the 15-10 "ShopCare sends no email itself" |
+| 16-10-2026 | **Pricing proposal** (§6): Starter ~$49 / Growth ~$149 / Pro ~$299 plus 5–10% of Care plan sales; no free plan, 14-day trial. To validate in brand calls; billing not built yet |
 | 15-10-2026 | Parts are planned from the quote's services (re-planning keeps hand-added parts) and taken from stock when the ticket moves to **completed**; the ticket stores parts + labour cost and margin (labour rate in Settings) |

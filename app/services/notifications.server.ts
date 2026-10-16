@@ -75,6 +75,16 @@ export interface NotificationDeps {
     shopId: string,
     recipient: DeliveryRecipient,
   ): string | null | undefined;
+  /**
+   * The suppression list (unsubscribes, bounces, complaints;
+   * notifications/suppressions.server.ts). Suppressed addresses are dropped
+   * before sending; with none left the delivery is skipped.
+   */
+  isSuppressed?(
+    shopId: string,
+    email: string,
+    options: { marketing: boolean },
+  ): Promise<boolean>;
   sendEmail?: (message: EmailMessage) => Promise<{ id: string }>;
   fetch?: typeof fetch;
   /** Defaults to app/lib/background.server.ts `enqueue`. */
@@ -308,10 +318,27 @@ async function sendShopEmail(
         : "No customer email",
     );
 
+  const marketing = MARKETING_EMAILS.includes(kind);
+  // "Notify staff at" may list several addresses.
+  let addresses = to
+    .split(/[,;]/)
+    .map((address) => address.trim())
+    .filter(Boolean);
+  if (deps.isSuppressed) {
+    const kept: string[] = [];
+    for (const address of addresses) {
+      if (!(await deps.isSuppressed(delivery.shopId, address, { marketing })))
+        kept.push(address);
+    }
+    addresses = kept;
+    if (addresses.length === 0)
+      return skip("Address suppressed (unsubscribed, bounced or complained)");
+  }
+
   const { recipient } = delivery.payload;
   let unsubscribeUrl: string | null | undefined;
   const headers: Record<string, string> = {};
-  if (MARKETING_EMAILS.includes(kind)) {
+  if (marketing) {
     if (!recipient.customerId)
       return skip("Guest customer: no email marketing consent");
     const consent = await deps.hasEmailMarketingConsent(recipient, {
@@ -341,11 +368,7 @@ async function sendShopEmail(
   const send = deps.sendEmail ?? defaultSendEmail;
   const result = await send({
     shopId: delivery.shopId,
-    // "Notify staff at" may list several addresses.
-    to: to
-      .split(/[,;]/)
-      .map((address) => address.trim())
-      .filter(Boolean),
+    to: addresses,
     ...content,
     replyTo: replyTo || undefined,
     fromName: `${settings.shopName} via ShopCare`,

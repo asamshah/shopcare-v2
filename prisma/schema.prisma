@@ -104,6 +104,7 @@ model Shop {
   careCredits            CareCredit[]
   processedRefunds       ProcessedRefund[]
   notificationDeliveries NotificationDelivery[]
+  emailSuppressions      EmailSuppression[]
   tradeInPrograms        TradeInProgram[]
   tradeIns               TradeIn[]
 
@@ -728,4 +729,28 @@ model CacheEntry {
 
   @@index([expiresAt])
   @@map("cache_entries")
+}
+
+// v2 (w2-backend): addresses ShopCare must not email. Bounces are global
+// (shop_id NULL, scope_key "global"); unsubscribes and complaints are per shop
+// (scope_key "shop:<id>"). The address is stored only as a SHA-256 digest of
+// its lower-cased form, so the list holds no readable personal data and
+// survives customers/redact. `kind`: "marketing" blocks marketing email only,
+// "all" blocks every email to the address.
+model EmailSuppression {
+  id          Int      @id @default(autoincrement())
+  shopId      Int?     @map("shop_id")
+  scopeKey    String   @map("scope_key")
+  emailDigest String   @map("email_digest")
+  kind        String
+  reason      String
+  detail      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([scopeKey, emailDigest, kind], map: "index_email_suppressions_on_scope_digest_kind")
+  @@index([emailDigest], map: "index_email_suppressions_on_email_digest")
+  @@map("email_suppressions")
 }

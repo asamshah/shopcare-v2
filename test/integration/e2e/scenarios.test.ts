@@ -19,8 +19,8 @@ import { action as refundsCreate } from "../../../app/routes/webhooks.refunds.cr
 import { addLineItem } from "../../../app/services/admin/tickets.server";
 import type { EmailMessage } from "../../../app/services/email.server";
 import { sendQuote } from "../../../app/services/quotes/send.server";
-import { changeTicketStatus } from "../../../app/services/repairs/ticket-status.server";
-import { buildCare, buildWorkshop } from "../../support/factories";
+import { changeTicketStatus, markItemReceived } from "../../../app/services/repairs/ticket-status.server";
+import { buildCare, buildWorkshop, WORKSHOP_SETTINGS } from "../../support/factories";
 import { FakeDraftOrders } from "../../support/fake-draft-orders";
 import { FakeGraphql } from "../../support/fake-graphql";
 import {
@@ -115,10 +115,10 @@ describe("end-to-end scenarios", () => {
   const events = async (event: string) =>
     (await prisma.notificationDelivery.findMany({ where: { event }, orderBy: { id: "asc" } })).map((d) => d.channel);
 
-  it("(a) intake → quote → paid → awaiting item → completed (stock used) → shown on the status page", async () => {
+  it("(a) intake → quote → paid → postage slip → received → completed (stock used) → shown on the status page", async () => {
     shop = await prisma.shop.update({
       where: { id: shop.id },
-      data: { settings: { ...(shop.settings as object), parts_enabled: "1" } },
+      data: { settings: { ...(shop.settings as object), ...WORKSHOP_SETTINGS, parts_enabled: "1" } },
     });
     const { glue } = await buildWorkshop(shop);
     const glueVariant = await prisma.partVariant.findFirstOrThrow({ where: { partId: glue.id } });
@@ -161,6 +161,17 @@ describe("end-to-end scenarios", () => {
     await deliver(ordersPaid, "orders/paid", paid); // retried delivery
     expect([(await ticketOf(ticketId)).status, (await quoteFor(ticketId)).status]).toEqual(["awaiting_item", "paid"]);
     expect(await events("quote_paid")).toContain("staff_email");
+    // The customer is asked to post the item, once, and the status page links the slip.
+    expect(await events("item_requested")).toEqual(["email"]);
+    const waiting = (await (await runRoute(status, signedGet("/proxy/status", domain, { customerId: CUSTOMER }))).json()) as {
+      tickets: { postage_slip_url?: string }[];
+    };
+    expect(waiting.tickets[0].postage_slip_url).toMatch(/\/apps\/repairs\/tickets\/\d+\/postage-slip\?/);
+
+    // 3b. The parcel arrives; staff mark it received and start the repair.
+    expect(await markItemReceived({ shopId: shop.id, ticketId, actor: "staff", client: api.client, enqueue: async () => {} })).toMatchObject({ ok: true });
+    expect(await events("item_received")).toEqual(["email"]);
+    await changeTicketStatus({ shopId: shop.id, ticketId, to: "in_repair", actor: "staff", client: api.client, enqueue: async () => {} });
     expect(await prisma.item.count()).toBe(0); // a repair invoice isn't a purchase
 
     // 4. Staff complete the repair: recipe parts come out of stock.

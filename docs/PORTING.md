@@ -20,10 +20,12 @@ the row in the same commit as the code.
 | `config/recurring.yml` | Netlify Scheduled Function in `netlify/functions/` that calls `enqueue()` |
 | ActiveStorage | `app/lib/storage.server.ts` (Netlify Blobs) + a key column |
 | `encrypts :field` | `app/lib/encryption.server.ts` (AES-256-GCM, context = `"Model.field"`) |
-| `Rails.cache` | Nothing is shared between function instances: Postgres or Netlify Blobs, or the CDN for public responses |
+| `Rails.cache` | Nothing is shared between function instances: the Postgres `cache_entries` table (`PostgresCache`, the default `ShopifyCache`), or the CDN for public responses |
 | Minitest + fixtures + mocha | Vitest; `test/support/factories.ts` builders; fakes passed in as dependencies (`vi.fn()` for one-off mocks) |
 | Model/service tests that touch the DB | `test/integration/**` (real Postgres, truncated per test) |
-| Pure logic tests | `test/unit/**` |
+| Pure logic tests | `test/unit/**` (never touch the database: the unit project passes with Postgres down) |
+| Shopify ids (`shopify_customer_id`, order/line/variant ids) | Strings (the numeric part of the GID) everywhere, never JS numbers; webhook payload ids are read from `admin_graphql_api_id` (JSON.parse would round ids past 2^53). The one exception is Flow's numeric `customer_id` |
+| Pure helpers shared across layers (GIDs, customer token, signing) | `app/lib/*` (`gid.ts`, `customer-token.server.ts`, `signing.server.ts`) |
 | `Shopify::AdminApi` and every Admin API call in a service | `app/shopify/*.server.ts`: plain functions taking an `AdminGraphqlClient` (`admin` from `authenticate.admin`, or `adminClientForShop(shop)`) and plain inputs, returning typed objects; operations validated against Admin API 2026-10; tests in `test/unit/shopify/` with `FakeGraphql` |
 
 ## Config and infrastructure
@@ -32,16 +34,20 @@ the row in the same commit as the code.
 |---|---|---|---|
 | `shopify.app.toml` | `shopify.app.toml` | done | scopes, app proxy (`apps`/`repairs` → `/proxy`), compliance webhooks. client_id is blank until linked |
 | `config/initializers/shopify_app.rb` (runtime webhooks) | `[[webhooks.subscriptions]]` in `shopify.app.toml` | done | app/uninstalled, orders/paid, refunds/create, 3 compliance topics; API version 2025-10 → 2026-10 |
-| `config/initializers/shopify_app.rb` (`after_authenticate_job`) | `hooks.afterAuth` in `app/shopify.server.ts` | todo | enqueue the order backfill |
+| `config/initializers/shopify_app.rb` (`after_authenticate_job`) | `hooks.afterAuth` in `app/shopify.server.ts` → `setUpShopAfterAuth` (app/services/shops/after-auth.server.ts) | wip | creates/reactivates the Shop row and ensures the customer signing key (encrypted column + app-data metafield). Wave 2: enqueue the order backfill (`OrderImporter.importRecent`) |
 | `config/routes.rb` | `app/routes/*` (flat routes) | todo | proxy paths unchanged: `/proxy/intake`, `/proxy/status`, `/proxy/quotes/:token` (+ `/decline`), `/proxy/orders`, `/proxy/catalog_search`, `/proxy/order_lookup`, `/proxy/care_plans`, `/proxy/care_offers`, `/proxy/trade_in_options`, `/proxy/trade_ins` |
 | `db/schema.rb` + `db/migrate/*` (26) | `prisma/schema.prisma` + `prisma/migrations/` | done | every domain table in one migration (`…_domain_schema`) on top of the template's `Session` migration; see [Schema notes](#schema-notes). Email settings go in `shops.settings` when the notifications are built |
-| `config/recurring.yml` `expire_quotes` (daily 3am) | `netlify/functions/expire-quotes.mts` | todo | template: `netlify/functions/daily-example.mts` |
+| `config/recurring.yml` `expire_quotes` (daily 3am) | `netlify/functions/expire-quotes.mts` | todo | template: `netlify/functions/daily-example.mts` or `daily-prune.mts` |
 | `config/storage.yml` (Disk / S3) | `app/lib/storage.server.ts` | done | Netlify Blobs; signed URLs served by `app/routes/files.$.tsx` |
 | `Shop` `encrypts` | `app/lib/encryption.server.ts` | done | key rotation via `APP_ENCRYPTION_PREVIOUS_KEYS`; `*_ciphertext` columns, read/written with `shopSecret` / `setShopSecret` in `app/models/shop.server.ts` |
 | `config/initializers/content_security_policy.rb` | `addDocumentResponseHeaders` (library) | done | the library sets frame-ancestors |
 | `test/storefront` CI job | `.github/workflows/ci.yml` | todo | add once the storefront journeys are ported |
 | `bin/brakeman`, `bin/rubocop` | `npm run lint`, `npm run typecheck` | done | |
 | Solid Queue / Solid Cache / Puma / Docker | Netlify Functions | done | `Dockerfile` kept from the template for self-hosting only |
+| `Rails.cache` (product facts, catalogue, repair products) | `cache_entries` table, `PostgresCache` (app/lib/postgres-cache.server.ts) | done | default `ShopifyCache` outside Vitest (in-memory under Vitest); TTL per caller; DB errors = cache miss |
+| `ProxyThrottling` (Rails.cache counters) | `proxy_throttles` table, `postgresThrottleStore` | done | default outside Vitest |
+| — (v2) daily housekeeping | `netlify/functions/daily-prune.mts` → job `daily-prune` | done | 03:15 UTC: throttle rows older than a day, expired cache entries |
+| — (v2) "Add Care" offer timing | `netlify/functions/daily-care-offers.mts` → job `care-offers` | done | 10:00 UTC: emits `care_offer` `care_offer_delay_days` (default 7) after purchase; consent checked at send |
 
 ## Netlify cost and latency: App Proxy traffic
 
@@ -104,9 +110,13 @@ export const action = proxyRoute({ throttle: { ... } }, async (ctx) => {
   The IP is the first `X-Forwarded-For` entry (Shopify's documented shopper
   IP), then `x-nf-client-connection-ip`: on proxy traffic the Netlify
   connecting IP is Shopify's, shared by every shopper.
-- **Wiring / tests**: `configureAppProxy({...})` swaps `customerSigningKey`,
-  `rememberPathPrefix`, `throttleStore`, `authenticate`, `now`; it returns a
-  restore function. Integration tests use `appProxyRequest()` from
+- **Wiring / tests**: defaults are production: `customerSigningKey` reads the
+  Shop row's decrypted key (`customerSigningKeyFor`), `rememberPathPrefix`
+  writes `settings.proxy_path_prefix` on change (`rememberProxyPathPrefix`),
+  `throttleStore` is Postgres (`proxy_throttles`; in memory under Vitest).
+  `configureAppProxy({...})` swaps any of them plus `authenticate` and `now`;
+  it returns a restore function. Unit tests stub every DB-backed dep.
+  Integration tests use `appProxyRequest()` from
   `test/support/shopify-requests.ts`.
 
 ## Notifications (v2 design)
@@ -125,9 +135,14 @@ the adapter, so a Postmark adapter can be added later.
 
 Built (`app/services/notifications.server.ts` + `app/services/notifications/`):
 templates, the dispatcher, the `notification` job, consent check, Flow and
-Klaviyo clients. Still to wire at integration: the Prisma `NotificationStore`,
-the shop settings loader, `setNotificationDeps()`, the unsubscribe route and
-the Resend bounce/complaint webhook + suppression list.
+Klaviyo clients. Wired (integration-1): `PrismaNotificationStore`
+(`notification_deliveries`; claim = insert, existing row on the unique
+conflict), `loadNotificationSettings` (Shop row, see Settings below), consent
+and Admin clients via the offline session; these are the default deps outside
+tests. **Still to build (wave 2, webhooks/jobs):** the signed unsubscribe
+route (until it exists `unsubscribeUrl` is unset, so the marketing "Add Care"
+email is skipped with "No unsubscribe link available"), and the Resend
+bounce/complaint webhook + suppression list.
 
 ### Emails
 
@@ -173,6 +188,27 @@ it. Guests have no consent record, so they are always skipped.
   structure stays fixed.
 - Staff alert address ("Notify staff at").
 - Support / Reply-To address.
+- Stored in `shops.settings.notifications` (snake_case): `flow` (Shopify
+  Flow, **off by default**: no shops are migrated), `staff_email`,
+  `support_email` (falls back to `settings.contact_email`), `logo_url`,
+  `accent_color`, `address_lines`, `store_url`, `locale`,
+  `emails.<kind>.{enabled,subject,intro}`, and `care_offer_delay_days`
+  (default 7). The Klaviyo key is the encrypted `klaviyoApiKey` secret.
+
+### "Add Care to your purchase" timing
+
+Rails emitted `care_offer` straight after the order and left the delay to the
+merchant's Flow/Klaviyo. In v2 ShopCare sends it: the daily scheduled function
+`netlify/functions/daily-care-offers.mts` (10:00 UTC) enqueues the
+`care-offers` job, which, for every installed shop, finds order Items bought
+`care_offer_delay_days` ago (with a 2-day catch-up for a missed run), works
+out the plans still on offer (Rails `Care::Notices#offer`: one offer per
+order) and emits `care_offer`. Consent is **not** checked when emitting: it's
+checked when the delivery is sent (marketing consent rule above), so a
+customer who unsubscribes in between gets nothing. The idempotency key
+`care_offer:order_<id>` stops repeats. Flow/Klaviyo, when enabled, get the
+event at the same moment. Code: app/services/care/care-offers.server.ts,
+app/jobs/care-offers.server.ts.
 
 ### Reliability
 
@@ -215,6 +251,13 @@ enables Flow or adds a Klaviyo key, independently of ShopCare's own emails.
   `customerEmailMarketingConsentUpdate` so the store and ShopCare agree.
 
 ## Schema notes
+
+- `…_proxy_throttles_and_cache` (integration-1) adds two v2 infrastructure
+  tables with no Rails counterpart: `proxy_throttles` (App Proxy counters,
+  from the reviewed `prisma/pending/proxy_throttles.sql`, now removed) and
+  `cache_entries` (shared TTL cache: `key` PK, `value` jsonb, `expires_at`).
+  Both are pruned by the daily `daily-prune` job.
+- `notification_deliveries.channel` also takes `staff_email` (v2).
 
 Phase 2 (branch `schema`) ported every domain table from `db/schema.rb` and
 the model layer.
@@ -308,27 +351,27 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/services/care/activator.rb` | app/services/care/activator.server.ts | todo |  |
+| `app/services/care/activator.rb` | app/services/care/activator.server.ts | done | `CareActivator`; units locked with `SELECT … FOR UPDATE` on the order's items; unique (shop, line, unit) makes races safe |
 | `app/services/care/credit_issuer.rb` | app/services/care/credit-issuer.server.ts | todo |  |
 | `app/services/care/notices.rb` | app/services/care/notices.server.ts | todo |  |
 | `app/services/care/plan_economics.rb` | app/services/care/plan-economics.server.ts | todo |  |
-| `app/services/care/plan_refunder.rb` | app/services/care/plan-refunder.server.ts | wip | Shopify calls done: `refundLineItem` in app/shopify/refunds.server.ts (suggestedRefund + refundCreate); the service builds the note from the cover |
+| `app/services/care/plan_refunder.rb` | app/services/care/plan-refunder.server.ts | done | `refundCarePlan(client, cover)` → `refundLineItem` (app/shopify/refunds.server.ts); v2 fix: refunds in the presentment currency (`presentmentMoney` + `RefundInput.currency`) when the order currency differs from the shop's |
 | `app/services/care/plan_terms.rb` | app/services/care/plan-terms.server.ts | done | pure function; tests are in care-plan.test.ts (Rails tested it via care_plan_test) |
 | `app/services/care/refund_handler.rb` | app/services/care/refund-handler.server.ts | todo |  |
 | `app/services/items/order_data.rb` | app/shopify/orders.server.ts | done | `orderFromGraphql` / `orderFromWebhook` → `OrderData`; unit price is a decimal string |
-| `app/services/items/order_importer.rb` | app/services/items/order-importer.server.ts | wip | runs in background job, cursor-paged. Shopify calls done: `fetchCustomerOrder`, `fetchRecentPaidOrders` (async pages) in app/shopify/orders.server.ts; recording Items remains |
+| `app/services/items/order_importer.rb` | app/services/items/order-importer.server.ts | done | `OrderImporter.importOrder` / `importRecent` over `fetchCustomerOrder` / `fetchRecentPaidOrders`. The backfill job (cursor-paged, re-enqueue) is wave 2 |
 | `app/services/items/owned_item_resolver.rb` | app/services/items/owned-item-resolver.server.ts | todo |  |
-| `app/services/items/recorder.rb` | app/services/items/recorder.server.ts | todo |  |
+| `app/services/items/recorder.rb` | app/services/items/recorder.server.ts | done | `ItemRecorder`; product facts fetched before the transaction; unique (shop, line, unit) makes concurrent webhooks safe |
 | `app/services/items/refund_processor.rb` | app/services/items/refund-processor.server.ts | todo |  |
 | `app/services/items/registration_submission.rb` | app/services/items/registration-submission.server.ts | todo |  |
 | `app/services/notifications/delivery_error.rb` | app/services/notifications/delivery-error.server.ts | done | adds `retryable` |
-| `app/services/notifications/dispatcher.rb` | app/services/notifications.server.ts (`emitNotification`, `deliverNotification`) + notifications/events.server.ts (EVENTS) | done | v2: email + staff_email channels, per-email toggles, consent at send time; templates in notifications/templates.server.ts. Deps wired by `setNotificationDeps()` at integration |
-| `app/services/notifications/flow_client.rb` | app/services/notifications/flow-client.server.ts | done | optional integration, unchanged trigger set; GraphQL client injected |
+| `app/services/notifications/dispatcher.rb` | app/services/notifications.server.ts (`emitNotification`, `deliverNotification`) + notifications/events.server.ts (EVENTS) | done | v2: email + staff_email channels, per-email toggles, consent at send time; templates in notifications/templates.server.ts. Production deps (notifications/production-deps.server.ts) are the default outside tests: `PrismaNotificationStore`, `loadNotificationSettings` (Shop row), Shopify consent + clients |
+| `app/services/notifications/flow_client.rb` | app/shopify/flow.server.ts (`triggerFlow`, `flowPayload`) + app/services/notifications/flow-client.server.ts (`FlowClient`: one attempt, errors → `DeliveryError`) | done | optional integration, unchanged trigger set; **off by default**. `customer_id` is the only place an id becomes a JSON number (Flow requires it); ids past 2^53 are sent as digits |
 | `app/services/notifications/klaviyo_client.rb` | app/services/notifications/klaviyo-client.server.ts | done | optional integration, unchanged event set; only 429/5xx/network retried |
 | `app/services/parts/consumer.rb` | app/services/parts/consumer.server.ts | todo |  |
 | `app/services/parts/csv_export.rb` | app/services/parts/csv-export.server.ts | todo |  |
 | `app/services/parts/csv_import.rb` | app/services/parts/csv-import.server.ts | todo | upload → storage.server.ts; long imports → background job |
-| `app/services/parts/item_properties.rb` | app/services/parts/item-properties.server.ts | wip | Shopify call done: `fetchVariantProperties` in app/shopify/product-facts.server.ts; saving to the Item remains |
+| `app/services/parts/item_properties.rb` | app/services/parts/item-properties.server.ts | done | `itemProperties(shop, client, item)`: fetched once (`fetched_at`), saved on the Item; Shopify read is `fetchVariantProperties` |
 | `app/services/parts/matcher.rb` | app/services/parts/matcher.server.ts | todo |  |
 | `app/services/parts/planner.rb` | app/services/parts/planner.server.ts | todo |  |
 | `app/services/parts/reorder_list.rb` | app/services/parts/reorder-list.server.ts | todo |  |
@@ -338,29 +381,29 @@ the model layer.
 | `app/services/repairs/customer_redactor.rb` | app/services/repairs/customer-redactor.server.ts | todo |  |
 | `app/services/repairs/event_payload.rb` | app/services/repairs/event-payload.server.ts | done | takes plain ticket/quotation objects |
 | `app/services/repairs/intake_submission.rb` | app/services/repairs/intake-submission.server.ts | todo |  |
-| `app/services/repairs/order_lookup.rb` | app/services/repairs/order-lookup.server.ts | wip | Shopify lookup + ownership check done: `findOrderByNumber` in app/shopify/orders.server.ts (line images on `OrderLine.imageUrl`); recording Items and the guest token remain |
+| `app/services/repairs/order_lookup.rb` | app/services/repairs/order-lookup.server.ts | done | `lookUpOrder` (records Items, one per line, images) + `orderToken` / `verifiedOrderId` (HMAC-signed, 2 h, per shop; key derived from APP_ENCRYPTION_KEY) |
 | `app/services/repairs/payment_processor.rb` | app/services/repairs/payment-processor.server.ts | todo |  |
 | `app/services/repairs/product_cards.rb` | app/services/repairs/product-cards.server.ts | todo |  |
 | `app/services/repairs/product_catalog.rb` | app/shopify/repair-products.server.ts | done | `listRepairVariants` (cached), `fetchRepairVariants` (paged, errors propagate: for ServiceSync), `fetchRepairVariant`; settings passed in |
 | `app/services/repairs/purchase_history.rb` | app/shopify/orders.server.ts | done | `fetchPurchaseHistory` |
 | `app/services/repairs/quote_canceller.rb` | app/services/repairs/quote-canceller.server.ts | todo |  |
 | `app/services/repairs/quote_decision.rb` | app/services/repairs/quote-decision.server.ts | todo |  |
-| `app/services/repairs/quote_draft_order.rb` | app/services/repairs/quote-draft-order.server.ts | todo |  |
+| `app/services/repairs/quote_draft_order.rb` | app/services/repairs/quote-draft-order.server.ts | wip | `quoteDraftOrderAttributes` done; v2 fix: real repair variants carry the quote price as `priceOverride` (REST ignored `price`). Wave 2: `id!` / `delete` over app/shopify/draft-orders.server.ts |
 | `app/services/repairs/quote_notifications.rb` | app/services/repairs/quote-notifications.server.ts | todo | call `emitNotification("quote_paid"\|"quote_declined"\|"quote_expired", …)`; field mapping already in notifications/events.server.ts |
 | `app/services/repairs/quote_sender.rb` | app/services/repairs/quote-sender.server.ts | todo |  |
-| `app/services/repairs/webhook_delivery.rb` | app/services/repairs/webhook-delivery.server.ts | done | SSRF guard: strict outside development/test, every resolved address public (wider ranges than Rails), connection pinned, no redirects |
+| `app/services/repairs/webhook_delivery.rb` | app/services/repairs/webhook-delivery.server.ts | done | SSRF guard: strict outside development/test, every resolved address public (wider ranges than Rails), connection pinned, no redirects. Headers: `User-Agent: ShopCare-Webhook/1.0`, `X-ShopCare-Event`, `X-ShopCare-Hmac-Sha256` |
 | `app/services/shopify/admin_api.rb` | app/shopify/graphql.server.ts, client.server.ts, draft-orders.server.ts, customers.server.ts, shop.server.ts | done | `adminGraphql` (typed data, THROTTLED/429 retry with backoff, `ShopifyGraphqlError`/`ShopifyUserError`), `adminClientForShop` (offline session). REST draft orders → `draftOrderCreate/Update/InvoiceSend/Complete/Delete`; REST customer metafields → `customer.metafield` + `metafieldsSet`; `shop_name` → `fetchShopInfo` |
-| `app/services/shopify/customer_signing_key.rb` | app/shopify/customer-signing-key.server.ts | done | storage via a `save` callback (caller encrypts with encryption.server.ts, context "Shop.customer_signing_key") |
-| `app/services/shopify/customer_token.rb` | app/services/shopify/customer-token.server.ts | done | takes the key instead of the shop; the key lookup is injected (`AppProxyDeps.customerSigningKey`) |
+| `app/services/shopify/customer_signing_key.rb` | app/shopify/customer-signing-key.server.ts | done | storage via a `save` callback: `saveCustomerSigningKey(shopId)` in app/models/shop.server.ts (encrypted column + `customer_signing_key_published_at` in settings); called from afterAuth |
+| `app/services/shopify/customer_token.rb` | app/lib/customer-token.server.ts | done | the single copy (exact `secure_compare` semantics); takes the decrypted key; the App Proxy looks it up on the Shop row (`customerSigningKeyFor`) |
 | `app/services/shopify/discount_codes.rb` | app/shopify/discount-codes.server.ts | done |  |
-| `app/services/shopify/gid.rb` | app/services/shopify/gid.server.ts | done | `numericId` / `buildGid`; no Rails test |
-| `app/services/trade_ins/credit_issuer.rb` | app/services/trade_ins/credit-issuer.server.ts | wip | Shopify calls done: `creditStoreCredit` (app/shopify/store-credit.server.ts), `createDiscountCode`; choosing the method remains |
+| `app/services/shopify/gid.rb` | app/lib/gid.ts | done | `numericId` / `buildGid` / `numericIdOrNull`; ids are strings |
+| `app/services/trade_ins/credit_issuer.rb` | app/services/trade_ins/credit-issuer.server.ts | done | `issueTradeInCredit` → `{ method, reference }`; currency = trade-in's, else the shop's (passed in; Rails fell back to GBP) |
 | `app/services/trade_ins/order_linker.rb` | app/services/trade_ins/order-linker.server.ts | todo |  |
 | `app/services/trade_ins/quoter.rb` | app/services/trade_ins/quoter.server.ts | todo |  |
 | `app/services/trade_ins/submission.rb` | app/services/trade_ins/submission.server.ts | todo |  |
 | `app/services/trade_ins/workflow.rb` | app/services/trade_ins/workflow.server.ts | todo |  |
-| `app/services/warranty/cover_assigner.rb` | app/services/warranty/cover-assigner.server.ts | todo |  |
-| `app/services/warranty/product_facts.rb` | app/shopify/product-facts.server.ts | done | `ProductFacts` (per-instance memo + `ShopifyCache`, in-memory by default) |
+| `app/services/warranty/cover_assigner.rb` | app/services/warranty/cover-assigner.server.ts | done | `CoverAssigner.factsFor` (outside the transaction) + `assign` |
+| `app/services/warranty/product_facts.rb` | app/shopify/product-facts.server.ts (`ProductFactsLoader`) + app/models/product-facts.ts (`ProductFacts` type) | done | per-instance memo + `ShopifyCache` (Postgres-shared outside tests) |
 
 ### Controllers: proxy (storefront) (9)
 
@@ -407,7 +450,7 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `app/jobs/after_authenticate_job.rb` | app/jobs/after-authenticate.server.ts | todo | shopify_app `after_authenticate_job` → `afterAuth` hook in shopify.server.ts → enqueue("import-orders") |
+| `app/jobs/after_authenticate_job.rb` | app/services/shops/after-auth.server.ts | wip | `afterAuth` hook → `setUpShopAfterAuth` (shop row + signing key). Wave 2: enqueue("import-orders") |
 | `app/jobs/app_uninstalled_job.rb` | app/routes/webhooks.app.uninstalled.tsx | todo | extend routes/webhooks.app.uninstalled.tsx (template deletes sessions only) |
 | `app/jobs/application_job.rb` | app/jobs/registry.server.ts | done | → app/jobs/registry.server.ts (done: pattern) |
 | `app/jobs/customers_data_request_job.rb` | app/jobs/webhooks/customers-data-request.server.ts | todo | `webhook` job handler CUSTOMERS_DATA_REQUEST |
@@ -416,7 +459,7 @@ the model layer.
 | `app/jobs/import_orders_job.rb` | app/jobs/import-orders.server.ts | todo | may exceed 15 min on big shops: page through and re-enqueue itself with a cursor |
 | `app/jobs/notification_job.rb` | app/jobs/notification.server.ts | done | one delivery per invocation; retryable errors rethrown until attempts = 3, then failed |
 | `app/jobs/orders_paid_job.rb` | app/jobs/webhooks/orders-paid.server.ts | todo | `webhook` job handler ORDERS_PAID |
-| `app/jobs/outbound_webhook_job.rb` | app/jobs/outbound-webhook.server.ts | done | job `outbound-webhook`; `emitOutboundWebhook()`; context loader wired by `setOutboundWebhookDeps()` at integration |
+| `app/jobs/outbound_webhook_job.rb` | app/jobs/outbound-webhook.server.ts | done | job `outbound-webhook`; `emitOutboundWebhook()`; default loader `loadOutboundWebhookContext` (app/services/repairs/outbound-webhook-context.server.ts); headers renamed `ShopCare-Webhook/1.0`, `X-ShopCare-Event`, `X-ShopCare-Hmac-Sha256` (Rails: `Repairs-App-*` / `X-Repairs-*`) |
 | `app/jobs/refunds_create_job.rb` | app/jobs/webhooks/refunds-create.server.ts | todo | `webhook` job handler REFUNDS_CREATE |
 | `app/jobs/shop_redact_job.rb` | app/jobs/webhooks/shop-redact.server.ts | todo | `webhook` job handler SHOP_REDACT |
 | `app/jobs/shop_webhook_job.rb` | app/jobs/webhooks/shop-webhook.server.ts | todo | base class → shared helper in app/jobs/webhook.server.ts |
@@ -511,35 +554,35 @@ the model layer.
 
 | Rails file | Planned TS module | Status | Notes |
 |---|---|---|---|
-| `test/services/care/activator_test.rb` | test/integration/services/care/activator.test.ts | todo |  |
+| `test/services/care/activator_test.rb` | test/integration/services/care/activator.test.ts | done | adds a concurrent-activation race |
 | `test/services/care/notices_and_economics_test.rb` | test/integration/services/care/notices-and-economics.test.ts | todo |  |
 | `test/services/care/refund_handler_test.rb` | test/integration/services/care/refund-handler.test.ts | todo |  |
 | `test/services/items/order_data_test.rb` | test/unit/shopify/orders.test.ts | done |  |
-| `test/services/items/order_importer_test.rb` | test/integration/services/items/order-importer.test.ts | wip | Shopify half in test/unit/shopify/orders.test.ts; Item recording assertions remain |
-| `test/services/items/recorder_test.rb` | test/integration/services/items/recorder.test.ts | todo |  |
+| `test/services/items/order_importer_test.rb` | test/integration/services/items/order-importer.test.ts | done | Shopify half also in test/unit/shopify/orders.test.ts |
+| `test/services/items/recorder_test.rb` | test/integration/services/items/recorder.test.ts | done | adds concurrent recording and the unit cap |
 | `test/services/items/refund_processor_test.rb` | test/integration/services/items/refund-processor.test.ts | todo |  |
 | `test/services/items/registration_submission_test.rb` | test/integration/services/items/registration-submission.test.ts | todo |  |
-| `test/services/notifications/notifications_test.rb` | test/unit/notifications/{notifications,integrations,templates}.test.ts | done | pure (in-memory store); adds consent, toggles, idempotency, retries, escaping, snapshots, Flow TOML parity. Encryption-at-rest of the Klaviyo key goes with the Shop model |
+| `test/services/notifications/notifications_test.rb` | test/unit/notifications/{notifications,integrations,templates}.test.ts + test/integration/wiring/notification-store.test.ts | done | unit: in-memory store; integration: Prisma store (claim/conflict/race), Shop-row settings, emit → deliver round trip |
 | `test/services/parts/csv_import_test.rb` | test/integration/services/parts/csv-import.test.ts | todo |  |
-| `test/services/parts/item_properties_test.rb` | test/integration/services/parts/item-properties.test.ts | wip | Shopify half in test/unit/shopify/products.test.ts; fetch-once + settings rename remain |
+| `test/services/parts/item_properties_test.rb` | test/integration/services/parts/item-properties.test.ts | done | Shopify half also in test/unit/shopify/products.test.ts |
 | `test/services/parts/planning_test.rb` | test/integration/services/parts/planning.test.ts | todo |  |
 | `test/services/parts/reorder_and_sync_test.rb` | test/integration/services/parts/reorder-and-sync.test.ts | todo |  |
 | `test/services/repairs/customer_redactor_test.rb` | test/integration/services/repairs/customer-redactor.test.ts | todo |  |
 | `test/services/repairs/event_payload_test.rb` | test/unit/repairs/outbound-webhook.test.ts | done |  |
 | `test/services/repairs/intake_submission_test.rb` | test/integration/services/repairs/intake-submission.test.ts | todo |  |
-| `test/services/repairs/order_lookup_and_catalog_test.rb` | test/integration/services/repairs/order-lookup-and-catalog.test.ts | wip | catalogue + lookup scenarios in test/unit/shopify/{products,orders}.test.ts; Item recording + order token remain |
+| `test/services/repairs/order_lookup_and_catalog_test.rb` | test/integration/services/repairs/order-lookup.test.ts + test/unit/shopify/{products,orders}.test.ts | done | lookup + Items + token in integration; catalogue + normalising in unit |
 | `test/services/repairs/payment_processor_test.rb` | test/integration/services/repairs/payment-processor.test.ts | todo |  |
 | `test/services/repairs/product_catalog_test.rb` | test/unit/shopify/products.test.ts | done |  |
 | `test/services/repairs/purchase_history_test.rb` | test/unit/shopify/orders.test.ts | done |  |
 | `test/services/repairs/quote_canceller_test.rb` | test/integration/services/repairs/quote-canceller.test.ts | todo |  |
 | `test/services/repairs/quote_decision_test.rb` | test/integration/services/repairs/quote-decision.test.ts | todo |  |
 | `test/services/repairs/quote_sender_test.rb` | test/integration/services/repairs/quote-sender.test.ts | todo |  |
-| `test/services/repairs/webhook_delivery_test.rb` | test/unit/repairs/webhook-delivery.test.ts | done |  |
+| `test/services/repairs/webhook_delivery_test.rb` | test/unit/repairs/webhook-delivery.test.ts | done | asserts the ShopCare header names |
 | `test/services/shopify/admin_api_test.rb` | test/unit/shopify/draft-orders.test.ts, graphql.test.ts | done | REST assertions → GraphQL operations/variables; adds throttling + userErrors |
-| `test/services/shopify/customer_signing_key_test.rb` | test/unit/shopify/customer-signing-key.test.ts | done |  |
-| `test/services/shopify/customer_token_test.rb` | test/unit/customer-token.test.ts | done | "encrypted at rest" case moves to the Shop model port; proxy_orders token cases are in test/unit/app-proxy.test.ts |
-| `test/services/trade_ins/trade_ins_test.rb` | test/integration/services/trade_ins/trade-ins.test.ts | todo |  |
-| `test/services/warranty/cover_assigner_test.rb` | test/integration/services/warranty/cover-assigner.test.ts | todo |  |
+| `test/services/shopify/customer_signing_key_test.rb` | test/unit/shopify/customer-signing-key.test.ts + test/integration/wiring/shop-proxy-wiring.test.ts | done | integration: afterAuth saves the key encrypted, publish failure retried |
+| `test/services/shopify/customer_token_test.rb` | test/unit/customer-token.test.ts | done | the shopify-api duplicate was dropped (it accepted upper-case hex, Rails didn't); end-to-end with the Shop row key in test/integration/wiring/shop-proxy-wiring.test.ts |
+| `test/services/trade_ins/trade_ins_test.rb` | test/integration/services/trade_ins/trade-ins.test.ts | wip | CreditIssuer half in test/integration/services/trade_ins/credit-issuer.test.ts; Quoter/Submission/Workflow remain (wave 2) |
+| `test/services/warranty/cover_assigner_test.rb` | test/integration/services/warranty/cover-assigner.test.ts | done |  |
 
 ### Tests: jobs (3)
 

@@ -29,12 +29,14 @@ app/
   routes/            React Router routes: app.* (admin), proxy.* (App Proxy), webhooks.*, files.$
   models/            one module per Rails model: validations, enums, business rules (plain functions over Prisma rows)
   shopify/           Admin API (GraphQL) calls: draft orders, discounts, store credit, orders, products, shop
-  lib/               infrastructure: encryption, storage, background dispatch, webhooks, http caching, row locks
-  services/          domain services (email.server.ts so far; Rails services are ported here)
+  lib/               infrastructure and pure helpers: encryption, signing, GIDs, customer token, storage,
+                     background dispatch, webhooks, http caching, row locks, Postgres cache, proxy throttling
+  services/          domain services (Rails app/services): notifications, items, care, warranty, repairs, …
   jobs/              background job handlers + registry
   shopify.server.ts  @shopify/shopify-app-react-router setup (Prisma session storage)
   db.server.ts       Prisma client
-netlify/functions/   jobs-background.mts (Background Function), daily-example.mts (Scheduled)
+netlify/functions/   jobs-background.mts (Background Function); Scheduled: daily-prune.mts
+                     (throttle + cache rows), daily-care-offers.mts ("Add Care" offer), daily-example.mts
 prisma/              schema + migrations (Postgres; every Rails table, see docs/PORTING.md#schema-notes)
 extensions/          theme app extension + Flow triggers (copied unchanged from Rails)
 parked/              Flow trigger not yet shipped (trade-in status)
@@ -81,7 +83,7 @@ Requirements: Node 22.12+, Docker, the [Shopify CLI](https://shopify.dev/docs/ap
 
 ```shell
 npm test                    # unit + integration
-npm run test:unit           # no database needed
+npm run test:unit           # no database needed (unit tests never touch Postgres)
 npm run test:integration    # needs the Postgres container
 npm run typecheck
 npm run lint
@@ -97,6 +99,13 @@ doesn't leak in. Patterns ported from the Rails suite:
 - `test/support/shopify-requests.ts`: real HMAC-signed App Proxy and webhook requests (Rails `ProxySigning`)
 - `test/support/fake-graphql.ts`: Admin GraphQL fake matched by query fragment (Rails `FakeGraphqlApi`)
 - Services take their Shopify client as a dependency, so tests pass a fake (Rails `api:` kwargs)
+- `test/support/orders.ts`: `OrderData` / GraphQL order node builders for recorder and lookup tests
+
+Production wiring is the default outside Vitest: the Postgres notification
+store and Shop-row settings, the Postgres throttle store and shared cache
+(`cache_entries`), the Shop row's customer signing key. Under Vitest those
+defaults are in-memory or must be set explicitly (`setNotificationDeps`,
+`configureAppProxy`, `setDefaultShopifyCache`, `setOutboundWebhookDeps`).
 
 CI (`.github/workflows/ci.yml`) runs install, `prisma generate`,
 `prisma migrate deploy` against a Postgres service container, then typecheck,

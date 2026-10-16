@@ -6,7 +6,6 @@
  * and jobs.
  */
 import type { PrismaClient, Quotation, RepairTicket, Shop } from "@prisma/client";
-import prisma from "../../db.server";
 import { withRowLock, type Db } from "../../lib/db-lock.server";
 import { settingsOf } from "../../models/shop.server";
 import type { ActivityAuthor } from "../../models/ticket-activity.server";

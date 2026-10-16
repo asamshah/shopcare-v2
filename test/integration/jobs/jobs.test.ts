@@ -59,7 +59,7 @@ describe("order backfill", () => {
   it("the import job records its outcome, one page per run, re-enqueueing with the cursor", async () => {
     let page = 0;
     const api = new FakeGraphql({
-      "orders(": (variables: Record<string, unknown>) => {
+      "orders(": () => {
         page++;
         return {
           orders: {

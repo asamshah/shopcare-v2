@@ -1,9 +1,9 @@
 /** Port of Rails test/services/items/refund_processor_test.rb. */
 import type { CarePlan, Cover, Item, Shop } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import prisma from "../../../../app/db.server";
 import { careCoverFor, createCover, warrantyCoverFor } from "../../../../app/models/cover.server";
-import { processRefund, type RefundWebhookBody } from "../../../../app/services/items/refund-processor.server";
+import { processRefund, type CareHandler, type RefundWebhookBody } from "../../../../app/services/items/refund-processor.server";
 import { buildCare, createItemFor, createShop, createWarrantyPolicyFor, daysAgo } from "../../../support/factories";
 
 // Lets a test fail, or race, the processor while it holds an item's lock.
@@ -34,7 +34,7 @@ describe("processRefund", () => {
       items.push(item);
     }
 
-    const count = await processRefund(shop, { order_id: 1, refund_line_items: [{ line_item_id: 9, quantity: 1 }] }, { careHandler: vi.fn() });
+    const count = await processRefund(shop, { order_id: 1, refund_line_items: [{ line_item_id: 9, quantity: 1 }] }, { careHandler: vi.fn<CareHandler>(async () => {}) });
 
     expect(count).toBe(1);
     const [first, last] = await Promise.all(items.map((i) => prisma.item.findUniqueOrThrow({ where: { id: i.id }, include: { covers: true } })));
@@ -48,7 +48,7 @@ describe("processRefund", () => {
     let plan: CarePlan;
     let items: Item[];
     let covers: Cover[];
-    let handler: ReturnType<typeof vi.fn>;
+    let handler: Mock<CareHandler>;
 
     const refund = (lines: RefundWebhookBody["refund_line_items"], id?: number) =>
       processRefund(shop, { ...(id ? { id } : {}), order_id: 500, refund_line_items: lines }, { careHandler: handler });
@@ -65,7 +65,7 @@ describe("processRefund", () => {
         items.push(item);
         covers.push(await createCover(careCoverFor(item, plan, { orderId: "500", lineItemId: "2", pricePaid: 15 })));
       }
-      handler = vi.fn(async () => {});
+      handler = vi.fn<CareHandler>(async () => {});
     });
 
     it("a refund delivered twice (retried or late) is applied once", async () => {
@@ -143,6 +143,6 @@ describe("processRefund", () => {
       ).toBe(1);
     });
 
-    void plan;
+
   });
 });

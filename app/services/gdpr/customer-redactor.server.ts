@@ -21,7 +21,6 @@
  */
 import type { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
-import type { Db } from "../../lib/db-lock.server";
 import { getStorage, type FileStorage } from "../../lib/storage.server";
 import { jsonArray } from "../../models/validation.server";
 import {

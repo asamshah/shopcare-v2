@@ -37,13 +37,13 @@ import { FakeDraftOrders } from "../support/fake-draft-orders";
 import { dbNotifyDeps } from "../support/quotes";
 import { webhookRequest } from "../support/shopify-requests";
 
-type Action = (args: { request: Request; params: object; context: object }) => Promise<Response>;
+type Action = typeof ordersPaid;
 const deliver = (route: Action, topic: string, shop: string, payload: unknown) =>
   route({
     request: webhookRequest(`/webhooks/${topic}`, { topic, shop, payload }),
     params: {},
     context: {},
-  });
+  } as Parameters<Action>[0]);
 
 describe("Shopify webhooks", () => {
   let shop: Shop;
@@ -79,7 +79,7 @@ describe("Shopify webhooks", () => {
   it("rejects a delivery with a bad HMAC", async () => {
     const request = webhookRequest("/webhooks/orders/paid", { topic: "orders/paid", shop: shop.shopifyDomain, payload: { id: 1 } });
     request.headers.set("x-shopify-hmac-sha256", "bm9wZQ==");
-    await expect(ordersPaid({ request, params: {}, context: {} })).rejects.toMatchObject({ status: 401 });
+    await expect(ordersPaid({ request, params: {}, context: {} } as Parameters<Action>[0])).rejects.toMatchObject({ status: 401 });
   });
 
   it("orders/paid records items for an ordinary sale, once", async () => {

@@ -3,9 +3,10 @@
  * app/shopify.server.ts; Rails `after_authenticate_job`): makes sure the Shop
  * row exists and the customer signing key is created, encrypted on the shop
  * and published to the app-data metafield Liquid reads.
- *
- * TODO(wave 2, webhooks/jobs): enqueue the order backfill here
- * (Items::OrderImporter), as Rails' after_authenticate_job did.
+ * Then, once per shop, it queues the order backfill ("import-orders" job:
+ * Items + cover from the last 60 days of paid orders), as Rails'
+ * after_authenticate_job did. Token exchange runs this often, so each step
+ * only does its work once.
  */
 import prisma from "../../db.server";
 import type { Db } from "../../lib/db-lock.server";
@@ -15,12 +16,14 @@ import {
   saveCustomerSigningKey,
 } from "../../models/shop.server";
 import { ensureCustomerSigningKey } from "../../shopify/customer-signing-key.server";
+import { queueOrderImport, type ImportOrdersDeps } from "../../jobs/import-orders.server";
 import { errorSummary, type AdminGraphqlClient } from "../../shopify/graphql.server";
 
 export async function setUpShopAfterAuth(
   shopDomain: string,
   client: AdminGraphqlClient,
   db: Db = prisma,
+  enqueue?: ImportOrdersDeps["enqueue"],
 ): Promise<void> {
   const shop = await findOrCreateShop(shopDomain, db);
   if (shop.uninstalledAt) {
@@ -41,5 +44,11 @@ export async function setUpShopAfterAuth(
     console.error(
       `[afterAuth] ${shopDomain}: customer signing key: ${errorSummary(error)}`,
     );
+  }
+  try {
+    const current = await db.shop.findUniqueOrThrow({ where: { id: shop.id } });
+    await queueOrderImport(current, { db: db as typeof prisma, enqueue });
+  } catch (error) {
+    console.error(`[afterAuth] ${shopDomain}: order backfill not queued: ${errorSummary(error)}`);
   }
 }

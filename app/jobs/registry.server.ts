@@ -16,7 +16,11 @@
 import { careOffersJob } from "./care-offers.server";
 import { dailyPruneJob } from "./daily-prune.server";
 import { exampleJob } from "./example.server";
+import { expireQuotesJob } from "./expire-quotes.server";
+import { importOrdersJob } from "./import-orders.server";
+import { marketingUnsubscribeJob } from "./marketing-unsubscribe.server";
 import { notificationJob } from "./notification.server";
+import { notificationSweepJob } from "./notification-sweep.server";
 import { outboundWebhookJob } from "./outbound-webhook.server";
 import { webhookJob } from "./webhook.server";
 
@@ -27,7 +31,11 @@ export const jobs = {
   "care-offers": careOffersJob,
   "daily-prune": dailyPruneJob,
   example: exampleJob,
+  "expire-quotes": expireQuotesJob,
+  "import-orders": importOrdersJob,
+  "marketing-unsubscribe": marketingUnsubscribeJob,
   notification: notificationJob,
+  "notification-sweep": notificationSweepJob,
   "outbound-webhook": outboundWebhookJob,
   webhook: webhookJob,
 } satisfies Record<string, JobHandler>;

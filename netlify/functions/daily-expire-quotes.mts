@@ -1,22 +1,17 @@
 /**
- * Netlify Scheduled Function, the template for daily jobs (Rails
- * ExpireQuotesJob and similar).
- *
- * Scheduled functions get 30 seconds and run only on the published deploy,
- * not on previews. Anything longer must be handed to the background function
- * with `enqueue()`, which is what this one does. Cron is in UTC.
+ * Netlify Scheduled Function (Rails config/recurring.yml `expire_quotes`,
+ * daily 3am): hands the "expire-quotes" job (app/jobs/expire-quotes.server.ts)
+ * to the background function, which expires sent quotes left unpaid past
+ * their validity. The review page and ticket view also expire an overdue
+ * quote when opened, so nothing waits on this to be correct. Runs on the
+ * published deploy only; cron is UTC.
  * https://docs.netlify.com/build/functions/scheduled-functions/
  */
 import type { Config } from "@netlify/functions";
 import { enqueue } from "../../app/lib/background.server";
 
-export default async (req: Request) => {
-  const { next_run } = (await req.json().catch(() => ({}))) as {
-    next_run?: string;
-  };
-  await enqueue("example", {
-    message: `daily run; next at ${next_run ?? "unknown"}`,
-  });
+export default async () => {
+  await enqueue("expire-quotes", {});
 };
 
 export const config: Config = {

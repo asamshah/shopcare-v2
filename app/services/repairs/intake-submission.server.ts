@@ -31,7 +31,8 @@ import {
 } from "../../models/repair-ticket.server";
 import { settingsOf } from "../../models/shop.server";
 import { createTicketActivity } from "../../models/ticket-activity.server";
-import { createTicketImage, validateTicketImage } from "../../models/ticket-image.server";
+import { sniffImageType } from "../../lib/image-type";
+import { createTicketImage, MAX_BYTES, validateTicketImage } from "../../models/ticket-image.server";
 import { ValidationError } from "../../models/validation.server";
 import { emitNotification, type NotificationDeps } from "../notifications.server";
 import { loadNotificationSettings } from "../notifications/shop-settings.server";
@@ -323,7 +324,10 @@ function safeFilename(name: string): string {
   return cleaned || "photo";
 }
 
-/** Best effort: a rejected file (wrong type, too big) doesn't fail the ticket. */
+/**
+ * Best effort: a rejected file (not really a JPEG/PNG/WebP/HEIC photo, too
+ * big) doesn't fail the ticket.
+ */
 async function attachImages(
   shop: Shop,
   ticket: RepairTicket,
@@ -334,14 +338,17 @@ async function attachImages(
 ) {
   const uploads = images.filter((image) => !blank(image)).slice(0, maxImages(shop));
   for (const upload of uploads) {
-    if (!isUpload(upload) || upload.size === 0) continue;
-    const contentType = (upload.type || "").toLowerCase();
+    if (!isUpload(upload) || upload.size === 0 || upload.size > MAX_BYTES) continue;
     const filename = safeFilename(upload.name);
     const storageKey = `shops/${shop.id}/tickets/${ticket.id}/${randomUUID()}-${filename}`;
-    const meta = { storageKey, contentType, byteSize: upload.size, filename };
-    if (!validateTicketImage(meta).isEmpty) continue;
     try {
-      await storage.put(storageKey, await upload.arrayBuffer(), { contentType });
+      const body = await upload.arrayBuffer();
+      // The real type from the file's bytes, not the declared one.
+      const contentType = sniffImageType(body);
+      if (!contentType) continue;
+      const meta = { storageKey, contentType, byteSize: upload.size, filename };
+      if (!validateTicketImage(meta).isEmpty) continue;
+      await storage.put(storageKey, body, { contentType });
       await createTicketImage({ repairTicketId: ticket.id, ...meta }, db);
     } catch (error) {
       logger.error(`[repairs/intake] photo for ticket ${ticket.id} not saved:`, error);

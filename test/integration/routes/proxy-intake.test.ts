@@ -108,6 +108,24 @@ describe("POST /proxy/intake", () => {
     expect(stored?.body.byteLength).toBe(images[0].byteSize);
   });
 
+  it("judges photos by their bytes, not the declared type", async () => {
+    const jpeg = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10])], "heel.jpg", { type: "image/png" });
+    const fake = new File(["<script>alert(1)</script>"], "evil.png", { type: "image/png" });
+    const response = await post({ description: "Heel", customer_email: "c@example.com", "images[]": [jpeg, fake] });
+
+    const images = await prisma.ticketImage.findMany({ where: { repairTicketId: (await json(response)).ticket_id } });
+    expect(images.map((i) => [i.filename, i.contentType])).toEqual([["heel.jpg", "image/jpeg"]]);
+  });
+
+  it("limits each visitor to 10 requests an hour (429 after that)", async () => {
+    for (let i = 0; i < 10; i++)
+      expect((await post({ description: `Try ${i}`, customer_email: "c@example.com" }, "")).status).toBe(200);
+    const limited = await post({ description: "Again", customer_email: "c@example.com" }, "");
+    expect(limited.status).toBe(429);
+    expect(await json(limited)).toEqual({ ok: false, error: "Too many repair requests. Please try again later." });
+    expect(await prisma.repairTicket.count()).toBe(10);
+  });
+
   it("keeps at most the shop's max_images photos", async () => {
     await prisma.shop.update({ where: { id: shop.id }, data: { settings: { intake: { max_images: 2 } } } });
     const response = await post({

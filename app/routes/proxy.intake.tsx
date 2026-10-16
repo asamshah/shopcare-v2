@@ -14,9 +14,18 @@ import { ProductFactsLoader } from "../shopify/product-facts.server";
  * POST /apps/repairs/intake → /proxy/intake (multipart: the form fields plus
  * `images[]`). Creates a repair ticket; a chosen item is re-verified server
  * side (owned-item resolver, or the guest's signed order token). 422 with
- * `errors` when it can't be filed. Port of Proxy::IntakeController.
+ * `errors` when it can't be filed; 429 past 10 requests an hour per visitor
+ * (300 per shop). Port of Proxy::IntakeController.
  */
-export const action = storefrontRoute({}, async (ctx) => {
+const INTAKE_LIMITS = {
+  name: "intake",
+  perIp: 10,
+  perShop: 300,
+  periodSeconds: 3600,
+  message: "Too many repair requests. Please try again later.",
+};
+
+export const action = storefrontRoute({ throttle: INTAKE_LIMITS }, async (ctx) => {
   const shop = ctx.shopRecord;
   const form = await formParams(ctx);
   const params: IntakeParams = {};

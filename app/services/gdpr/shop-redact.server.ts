@@ -9,8 +9,8 @@
  * straight away; v2 leaves the erasure to shop/redact.
  *
  * `shop/redact` (redactShop, mandatory GDPR, ~48 h after uninstall): erases
- * the shop: its stored files (ticket photos, registration proofs, trade-in
- * photos, GDPR exports), then the shop row, which cascades to every table,
+ * the shop: its stored files (ticket photos, postage slips, registration
+ * proofs, trade-in photos, GDPR exports), then the shop row, which cascades to every table,
  * and its sessions. Idempotent: a shop already gone is a no-op.
  */
 import prisma from "../../db.server";
@@ -36,6 +36,11 @@ export async function storedFileKeys(shopId: number, db = prisma): Promise<strin
     select: { storageKey: true },
   });
   keys.push(...images.map((image) => image.storageKey!));
+  const slips = await db.repairTicket.findMany({
+    where: { shopId, postageSlipKey: { not: null } },
+    select: { postageSlipKey: true },
+  });
+  keys.push(...slips.map((ticket) => ticket.postageSlipKey!));
   const proofs = await db.registration.findMany({
     where: { shopId, proofKey: { not: null } },
     select: { proofKey: true },

@@ -4,7 +4,7 @@
  * answer the customer. (Rails only logged the counts.)
  *
  *   1. Collects the customer's repair tickets (with activity log, quotes and
- *      their lines, photo metadata), items (with cover and registration),
+ *      their lines, photo metadata, a link to the stored postage slip), items (with cover and registration),
  *      trade-ins and notification log entries (matching rules in
  *      customer-match.server.ts). Internal secrets (quote token ciphertext
  *      and digest) are left out.
@@ -97,7 +97,8 @@ export async function buildCustomerExport(
     shop: shop.shopifyDomain,
     customer: { shopify_customer_id: ref.customerId, email: ref.email, orders: ref.orderIds },
     repair_tickets: tickets.map((ticket) => ({
-      ...omit(ticket, "ticketImages", "quotations", "activities"),
+      ...omit(ticket, "ticketImages", "quotations", "activities", "postageSlipKey", "postageSlipDigest"),
+      postage_slip_url: fileLink(ticket.postageSlipKey),
       activities: ticket.activities,
       photos: ticket.ticketImages.map((image) => ({
         filename: image.filename,

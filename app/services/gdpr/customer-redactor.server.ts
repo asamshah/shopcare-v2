@@ -5,7 +5,8 @@
  * extended to every place v2 keeps personal data:
  *
  *   repair tickets       name, email, phone, address, Shopify id, description;
- *                        photos (rows + stored files); free-text activity
+ *                        photos (rows + stored files); the stored postage
+ *                        slip (it prints the name and address); free-text activity
  *                        bodies (notes, quote decisions, anything the customer
  *                        wrote); quote decline reasons
  *   items                name, email, Shopify id, properties; the
@@ -55,8 +56,12 @@ export async function redactCustomer(
   const summary: RedactionSummary = { tickets: 0, items: 0, tradeIns: 0, deliveries: 0, files: 0 };
   const keys: string[] = [];
 
-  const tickets = await db.repairTicket.findMany({ where: ticketWhere(shopId, ref), select: { id: true } });
-  for (const { id } of tickets) {
+  const tickets = await db.repairTicket.findMany({
+    where: ticketWhere(shopId, ref),
+    select: { id: true, postageSlipKey: true },
+  });
+  for (const { id, postageSlipKey } of tickets) {
+    if (postageSlipKey) keys.push(postageSlipKey);
     await db.$transaction(async (tx) => {
       const images = await tx.ticketImage.findMany({ where: { repairTicketId: id } });
       keys.push(...images.flatMap((image) => (image.storageKey ? [image.storageKey] : [])));
@@ -70,6 +75,8 @@ export async function redactCustomer(
           customerPhone: null,
           customerAddress: {},
           description: REDACTED,
+          postageSlipKey: null,
+          postageSlipDigest: null,
         },
       });
       await tx.ticketActivity.updateMany({

@@ -163,13 +163,15 @@ describe("Shopify webhooks", () => {
   });
 
   it("shop/redact removes the shop's data and stored files", async () => {
-    const ticket = await createRepairTicketFor(shop);
+    const ticket = await createRepairTicketFor(shop, { postageSlipKey: "shops/1/tickets/1/postage-slip.pdf" });
     const image = await createTicketImageFor(ticket.id);
     await storage.put(image.storageKey!, "jpeg");
+    await storage.put("shops/1/tickets/1/postage-slip.pdf", "pdf");
     await deliver(shopRedact, "shop/redact", shop.shopifyDomain, {});
     expect(await prisma.shop.count({ where: { id: shop.id } })).toBe(0);
     expect(await prisma.repairTicket.count({ where: { id: ticket.id } })).toBe(0);
     expect(await storage.get(image.storageKey!)).toBeNull();
+    expect(await storage.get("shops/1/tickets/1/postage-slip.pdf")).toBeNull();
   });
 
   it("shop/redact removes a shop with items, cover, parts and stock history", async () => {
@@ -246,9 +248,12 @@ describe("Shopify webhooks", () => {
         customerName: "Sam",
         customerPhone: "0123",
         description: "Torn sole, call me on 0123",
+        postageSlipKey: "shops/1/tickets/9/postage-slip.pdf",
+        postageSlipDigest: "abc",
       });
       const image = await createTicketImageFor(ticket.id);
       await storage.put(image.storageKey!, "jpeg");
+      await storage.put("shops/1/tickets/9/postage-slip.pdf", "pdf");
       await createTicketActivityFor(ticket.id, { activityType: "note", body: "Sam rang about the boots" });
       await createTicketActivityFor(ticket.id, { activityType: "status_change", body: "Status changed from new to assessing." });
       await createQuotationFor(ticket.id, { status: "declined", decisionReason: "My dog chewed them" });
@@ -281,6 +286,9 @@ describe("Shopify webhooks", () => {
       ]);
       expect(t.ticketImages).toEqual([]);
       expect(await storage.get(image.storageKey!)).toBeNull();
+      // The postage slip prints the customer's name and address.
+      expect([t.postageSlipKey, t.postageSlipDigest]).toEqual([null, null]);
+      expect(await storage.get("shops/1/tickets/9/postage-slip.pdf")).toBeNull();
       expect(t.activities.map((a) => a.body).sort()).toEqual([
         "Customer data redacted on request.",
         "Status changed from new to assessing.",
@@ -330,7 +338,13 @@ describe("Shopify webhooks", () => {
         where: { id: shop.id },
         data: { settings: { notifications: { staff_email: "workshop@shop.test" } } },
       });
-      const ticket = await createRepairTicketFor(shop, { shopifyCustomerId: "9", customerEmail: "a@example.com", customerName: "A" });
+      const ticket = await createRepairTicketFor(shop, {
+        shopifyCustomerId: "9",
+        customerEmail: "a@example.com",
+        customerName: "A",
+        postageSlipKey: "shops/1/tickets/1/postage-slip.pdf",
+        postageSlipDigest: "abc",
+      });
       await createTicketImageFor(ticket.id);
       await createQuotationFor(ticket.id, { status: "sent", decisionTokenDigest: "abc", decisionTokenCiphertext: "secret" });
       await createItemFor(shop, { customerEmail: "A@example.com" });
@@ -347,6 +361,8 @@ describe("Shopify webhooks", () => {
       expect(exported.repair_tickets).toHaveLength(1);
       expect(exported.repair_tickets[0].customerName).toBe("A");
       expect(exported.repair_tickets[0].photos[0].url).toContain("/files/");
+      expect(verifySignedUrl(new URL(exported.repair_tickets[0].postage_slip_url))).toBe("shops/1/tickets/1/postage-slip.pdf");
+      expect(exported.repair_tickets[0]).not.toHaveProperty("postageSlipKey");
       expect(exported.repair_tickets[0].quotes[0]).not.toHaveProperty("decisionTokenCiphertext");
       expect(exported.items).toHaveLength(1);
 

@@ -21,7 +21,9 @@ include_config_on_deploy = true
 [access_scopes]
 # Same scopes as the Rails app:
 # read_products       repair-product picker (filtered by collection/tag)
-# read_customers      customer PII on tickets (protected customer data)
+# write_customers     customer PII on tickets (protected customer data); v2
+#                     also records an unsubscribe from ShopCare's marketing
+#                     email in Shopify (customerEmailMarketingConsentUpdate)
 # read_orders         order history / warranty lookups (last 60 days)
 # write_draft_orders  build, invoice & complete the quote draft order
 # write_orders        refund a Care plan when its item is refunded
@@ -29,7 +31,7 @@ include_config_on_deploy = true
 # write_store_credit_account_transactions  trade-in credit as store credit
 # Full purchase history needs `read_all_orders`, which Shopify gates. Request
 # approval in the Partner dashboard before adding it.
-scopes = "read_products,read_customers,read_orders,write_draft_orders,write_orders,write_discounts,write_store_credit_account_transactions"
+scopes = "read_products,write_customers,read_orders,write_draft_orders,write_orders,write_discounts,write_store_credit_account_transactions"
 use_legacy_install_flow = false
 
 [auth]

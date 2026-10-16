@@ -749,3 +749,14 @@ CREATE UNIQUE INDEX "index_trade_ins_one_open_per_item"
 -- Product group names are unique per shop, case-insensitively.
 CREATE UNIQUE INDEX "index_product_groups_on_shop_id_and_name"
   ON "product_groups" ("shop_id", lower("name"));
+
+-- Rails `dependent: :restrict_with_error` links: a product group used by a
+-- plan or policy, and a part or variant used on a ticket, can't be deleted.
+-- The checks are deferred to commit so that deleting a shop, which cascades
+-- to both sides of these links by different paths, succeeds whatever order
+-- Postgres runs the cascades in. Prisma doesn't model deferrability; keep
+-- these lines if a later migration recreates the constraints.
+ALTER TABLE "care_plans" ALTER CONSTRAINT "care_plans_product_group_id_fkey" DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "warranty_policies" ALTER CONSTRAINT "warranty_policies_product_group_id_fkey" DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "ticket_parts" ALTER CONSTRAINT "ticket_parts_part_id_fkey" DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE "ticket_parts" ALTER CONSTRAINT "ticket_parts_part_variant_id_fkey" DEFERRABLE INITIALLY DEFERRED;

@@ -59,14 +59,16 @@ model Session {
 //   encrypts :x         x_ciphertext text (app/lib/encryption.server.ts)
 //   Active Storage      storage key + metadata columns (app/lib/storage.server.ts)
 // Rails `dependent:` maps to onDelete: destroy/delete_all → Cascade,
-// nullify → SetNull, restrict_with_error → NoAction (checked at the end of the
-// statement, so a cascading shop delete still works).
+// nullify → SetNull, restrict_with_error → NoAction, made DEFERRABLE INITIALLY
+// DEFERRED in the migration SQL so a cascading shop delete still works (the
+// model layer also refuses such deletes up front, like Rails).
 //
 // Indexes Prisma can't express are added by hand in the migration SQL:
 //   covers_care_line_unit (partial unique)
 //   items order line unit (partial unique)
 //   trade_ins_one_open_per_item (partial unique)
 //   product_groups (shop_id, lower(name)) (expression unique)
+// and the four NoAction foreign keys are altered to DEFERRABLE there too.
 // ---------------------------------------------------------------------------
 
 /// A shop that installed the app. Access tokens live in Session (keyed by

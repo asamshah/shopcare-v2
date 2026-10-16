@@ -67,6 +67,16 @@ describe("items", () => {
     expect(shown.registration?.unverified).toBe(true);
     const covered = await get<Item>(itemLoader, `/app/items/${item.id}`, { id: String(item.id) });
     expect(covered.covers.map((c) => [c.name, c.state])).toEqual([["12-month warranty", "Active"]]);
+    expect(covered.covers[0].credit).toBeNull();
+
+    // A Care credit code (ShopCare doesn't email it): staff see it to share.
+    const cover = await prisma.cover.findFirstOrThrow({ where: { itemId: item.id } });
+    await prisma.careCredit.create({
+      data: { shopId: shop.id, coverId: cover.id, code: "CARE-7XK2", amount: 15, expiresAt: new Date(Date.UTC(2027, 0, 14)) },
+    });
+    const credited = await get<Item>(itemLoader, `/app/items/${item.id}`, { id: String(item.id) });
+    expect(credited.covers[0].credit?.code).toBe("CARE-7XK2");
+    expect(credited.covers[0].credit?.text).toMatch(/^Care credit code CARE-7XK2 for £15\.00, use by .+2027\. Give it to the customer/);
 
     const res = await post(itemAction, `/app/items/${registered.id}`, { intent: "verify", note: "Receipt checked" }, {
       id: String(registered.id),

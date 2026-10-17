@@ -21,6 +21,8 @@ export interface AdminGraphqlClient {
     query: string,
     options?: { variables?: GraphqlVariables },
   ): Promise<Response>;
+  /** Default retry policy for every call through this client (see withRetry). */
+  retry?: RetryOptions;
 }
 
 export interface GraphqlErrorDetail {
@@ -72,6 +74,19 @@ export interface RetryOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Storefront requests wait on Shopify while a customer watches a spinner, so
+ * when Shopify throttles they retry once, briefly, and then fail (the block
+ * shows its "try again" state). Jobs keep the default: 5 attempts, up to 10 s
+ * apart.
+ */
+export const STOREFRONT_RETRY: RetryOptions = { maxAttempts: 2, maxDelayMs: 2000 };
+
+/** The same client with a different default retry policy. */
+export function withRetry(client: AdminGraphqlClient, retry: RetryOptions): AdminGraphqlClient {
+  return { graphql: (query, options) => client.graphql(query, options), retry: { ...client.retry, ...retry } };
+}
+
 const defaultSleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -110,8 +125,9 @@ export async function adminGraphql<T>(
   client: AdminGraphqlClient,
   query: string,
   variables: GraphqlVariables = {},
-  retry: RetryOptions = {},
+  callRetry: RetryOptions = {},
 ): Promise<T> {
+  const retry = { ...client.retry, ...callRetry };
   const maxAttempts = retry.maxAttempts ?? 5;
   const baseDelay = retry.baseDelayMs ?? 1000;
   const maxDelay = retry.maxDelayMs ?? 10_000;

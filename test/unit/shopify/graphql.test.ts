@@ -5,6 +5,8 @@ import {
   assertNoUserErrors,
   moneyString,
   ShopifyGraphqlError,
+  STOREFRONT_RETRY,
+  withRetry,
   ShopifyUserError,
   type AdminGraphqlClient,
 } from "../../../app/shopify/graphql.server";
@@ -152,6 +154,31 @@ describe("adminGraphql", () => {
     await expect(failure).rejects.toMatchObject({ throttled: true });
     expect(client.graphql).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("a storefront client retries once, after the wait Shopify asks for (at most 2 s)", async () => {
+    const sleep = vi.fn<(ms: number) => Promise<void>>(async () => {});
+    const inner = scripted(json(throttledBody), json(throttledBody), json({ data: { ok: true } }));
+    const client = withRetry(inner, { ...STOREFRONT_RETRY, sleep });
+
+    await expect(adminGraphql(client, "query { ok }")).rejects.toMatchObject({ throttled: true });
+    expect(inner.graphql).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(1000); // 100 points short at 100 a second
+  });
+
+  it("a storefront client never waits more than 2 s", async () => {
+    const sleep = vi.fn<(ms: number) => Promise<void>>(async () => {});
+    const slow = { ...throttledBody, extensions: { cost: { requestedQueryCost: 900, throttleStatus: { currentlyAvailable: 0, restoreRate: 50 } } } };
+    const client = withRetry(scripted(json(slow), json({ data: { ok: true } })), { ...STOREFRONT_RETRY, sleep });
+    expect(await adminGraphql(client, "query { ok }")).toEqual({ ok: true });
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(2000); // Shopify asked for 18 s
+  });
+
+  it("a call's own retry options win over the client's", async () => {
+    const sleep = vi.fn<(ms: number) => Promise<void>>(async () => {});
+    const inner = scripted(json(throttledBody), json(throttledBody), json({ data: { ok: true } }));
+    const client = withRetry(inner, { ...STOREFRONT_RETRY, sleep });
+    expect(await adminGraphql(client, "query { ok }", {}, { maxAttempts: 3 })).toEqual({ ok: true });
   });
 });
 

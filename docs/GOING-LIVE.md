@@ -166,6 +166,8 @@ ShopCare sends no email. Check each one in a dev store:
       plan save). Edit a plan → the product page shows the change on reload.
 - [ ] In the theme editor, open a product no plan covers: the block shows a
       dashed note explaining why (customers see nothing there).
+- [ ] Change the Care product's price in Shopify: the product page shows the
+      new price after the next sync (daily, or at once after any Care plan save).
 - [ ] Buy a product with Care → the item shows Care cover; refund the product →
       the Care line is refunded (or a credit code issued, per Settings).
 - [ ] A covered repair: the £0 quote completes itself (no invoice) and the

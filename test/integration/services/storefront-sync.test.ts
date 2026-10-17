@@ -18,10 +18,21 @@ import {
 import { createCarePlanFor, createProductGroupFor, createShop } from "../../support/factories";
 import { FakeGraphql } from "../../support/fake-graphql";
 
-const fakeShopify = () =>
+/** Shopify, with every Care variant at `prices[variant id]` (default 15.00; null = deleted). */
+const fakeShopify = (prices: Record<string, string | null> = {}) =>
   new FakeGraphql({
     currentAppInstallation: { currentAppInstallation: { id: "gid://shopify/AppInstallation/1" } },
     metafieldsSet: { metafieldsSet: { metafields: [{ id: "gid://shopify/Metafield/1" }], userErrors: [] } },
+    "productVariant(id:": ({ id }: Record<string, unknown>) => {
+      const variantId = String(id).split("/").pop()!;
+      const price = variantId in prices ? prices[variantId] : "15.00";
+      return {
+        productVariant:
+          price === null
+            ? null
+            : { id, title: "Default Title", price, product: { id: "gid://shopify/Product/1", title: "2-year Care" } },
+      };
+    },
   });
 
 describe("storefront data", () => {
@@ -77,6 +88,21 @@ describe("storefront data", () => {
     ]);
     expect(JSON.parse(metafield.value).plans).toHaveLength(1);
     expect(purge).toHaveBeenCalledWith(["shop:sync-test.myshopify.com"]);
+  });
+
+  it("refreshes each plan's price from its Shopify variant before publishing", async () => {
+    const changed = await createCarePlanFor(shop, { shopifyVariantId: "7001", price: 15 });
+    const same = await createCarePlanFor(shop, { shopifyVariantId: "7002", price: 9 });
+    const deleted = await createCarePlanFor(shop, { shopifyVariantId: "7003", price: 5 });
+    const shopify = fakeShopify({ "7001": "19.99", "7002": "9.00", "7003": null });
+
+    await syncStorefront(shop.id, { client: async () => shopify, purge: async () => {} });
+
+    const prices = await prisma.carePlan.findMany({ where: { id: { in: [changed.id, same.id, deleted.id] } }, orderBy: { id: "asc" } });
+    expect(prices.map((p) => p.price.toFixed(2))).toEqual(["19.99", "9.00", "5.00"]);
+    const set = shopify.calls.find((c) => c.query.includes("metafieldsSet"))!;
+    const published = JSON.parse((set.variables.metafields as { value: string }[])[0].value);
+    expect(published.plans.map((p: { price: string }) => p.price)).toEqual(["19.99", "9.00", "5.00"]);
   });
 
   it("still counts as synced when only the cache purge fails", async () => {

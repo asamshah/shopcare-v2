@@ -9,6 +9,11 @@
  * the app is down. The proxy endpoint stays as the fallback (a store whose
  * metafield isn't published yet).
  *
+ * Each sync first refreshes every active plan's price from its Care product
+ * variant in Shopify. A plan copies the price when it's saved, so a price
+ * changed later in Shopify would otherwise show the old one on the product
+ * page (and on the cover) while the cart charges the new one.
+ *
  * `storefrontChanged(shop)` is called after a merchant edit that changes what
  * the storefront shows (Care plans, product groups, settings, trade-in
  * programs) and on install; the daily prune also queues it for every shop, in
@@ -16,7 +21,7 @@
  * republishes the metafield and clears the shop's CDN-cached App Proxy
  * responses (tag `shop:<domain>`), so edits show at once.
  */
-import type { ProductGroup, Shop } from "@prisma/client";
+import { Prisma, type ProductGroup, type Shop } from "@prisma/client";
 import prisma from "../../db.server";
 import type { JobPayload } from "../../jobs/registry.server";
 import type { Db } from "../../lib/db-lock.server";
@@ -24,6 +29,7 @@ import { reportError } from "../../lib/errors.server";
 import { activeCarePlans } from "../../models/care-plan.server";
 import { groupTags, productGroupCollectionIds } from "../../models/product-group.server";
 import type { AdminGraphqlClient } from "../../shopify/graphql.server";
+import { fetchRepairVariant } from "../../shopify/repair-products.server";
 import { publishStorefrontData } from "../../shopify/storefront-data.server";
 import { planJson, storefrontCurrency } from "./care-json.server";
 
@@ -108,6 +114,7 @@ export async function syncStorefront(shopId: number, deps: StorefrontSyncDeps = 
   const client = await (deps.client ?? offlineClient)(shop);
   if (!client) return "skipped";
 
+  await refreshPlanPrices(shop.id, client, db);
   await publishStorefrontData(client, await buildStorefrontData(shop, db));
   try {
     await (deps.purge ?? netlifyPurge)([`shop:${shop.shopifyDomain}`]);
@@ -116,6 +123,29 @@ export async function syncStorefront(shopId: number, deps: StorefrontSyncDeps = 
     await reportError(error, { area: "storefront-sync", step: "purge", shop: shop.shopifyDomain });
   }
   return "synced";
+}
+
+/**
+ * Copies each active plan's Care variant price from Shopify onto the plan.
+ * A variant Shopify can't find (deleted) keeps its plan's price. Returns how
+ * many plans changed.
+ */
+export async function refreshPlanPrices(
+  shopId: number,
+  client: AdminGraphqlClient,
+  db: typeof prisma = prisma,
+): Promise<number> {
+  let changed = 0;
+  for (const plan of await activeCarePlans(shopId, db)) {
+    const variant = await fetchRepairVariant(client, plan.shopifyVariantId);
+    if (!variant) continue;
+    const price = new Prisma.Decimal(variant.price);
+    if (price.equals(plan.price)) continue;
+    await db.carePlan.update({ where: { id: plan.id }, data: { price } });
+    console.info(`[storefront-sync] plan ${plan.id} price ${plan.price.toFixed(2)} → ${price.toFixed(2)} (from Shopify)`);
+    changed++;
+  }
+  return changed;
 }
 
 export async function storefrontSyncJob(payload: JobPayload): Promise<void> {

@@ -141,6 +141,7 @@ under Site configuration → Environment variables.
 | `DATABASE_URL` / `DIRECT_URL` | always | Neon pooled / direct connection strings |
 | `APP_ENCRYPTION_KEY` | always | `openssl rand -base64 32`; never change it without moving the old one to `APP_ENCRYPTION_PREVIOUS_KEYS` |
 | `BACKGROUND_DISPATCH` | Netlify | `netlify` |
+| `SENTRY_DSN` | recommended in production | where failed jobs and server errors are reported ([Sentry](https://sentry.io), free tier is enough); without it errors only reach Netlify's function logs. No customer data is sent |
 | `SHOPIFY_APP_HANDLE` | if not `shopcare` | the app's handle in admin URLs; Flow staff alerts and the postage slip's QR code link to `https://admin.shopify.com/store/<store>/apps/<handle>/app/tickets/<id>` |
 | `STORAGE_*`, `BACKGROUND_FUNCTIONS_URL`, `SHOP_CUSTOM_DOMAIN`, `APP_ENCRYPTION_PREVIOUS_KEYS` | optional | see `.env.example` |
 

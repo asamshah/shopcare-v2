@@ -49,6 +49,7 @@ or `deferred`.
 | `Rails.cache` (product facts, catalogue, repair products) | `cache_entries` table, `PostgresCache` (app/lib/postgres-cache.server.ts) | done | default `ShopifyCache` outside Vitest (in-memory under Vitest); TTL per caller; DB errors = cache miss |
 | `ProxyThrottling` (Rails.cache counters) | `proxy_throttles` table, `postgresThrottleStore` | done | default outside Vitest |
 | — (v2) daily housekeeping | `netlify/functions/daily-prune.mts` → job `daily-prune` | done | 03:15 UTC: throttle rows older than a day, expired cache entries |
+| — (v2) error reporting | `app/lib/errors.server.ts` (`SENTRY_DSN`) | done | jobs that give up, failed dispatches and sweeps, loader/action errors (`handleError` in app/entry.server.tsx); tags only, no payloads |
 | — (v2) stuck-notification sweep | `netlify/functions/hourly-notification-sweep.mts` → job `notification-sweep` | done | hourly at :20: re-enqueues `pending` deliveries 15 min–48 h old |
 | — (v2) email unsubscribe + suppression | removed 16-10-2026 (Shopify sends every email; see [Notifications](#notifications)) | removed | migration `…_shopify_sends_emails` drops `email_suppressions` |
 | — (v2) "Add Care" offer timing | `netlify/functions/daily-care-offers.mts` → job `care-offers` | done | 10:00 UTC: emits `care_offer` (Flow / Klaviyo) `care_offer_delay_days` (default 7) after purchase and syncs the `shopcare-care-offer-eligible` customer tag |

@@ -345,6 +345,14 @@
     // block when there's nothing to offer.
     function settle(show) {
       root.removeAttribute("aria-busy");
+      // In the theme editor, say why the block would be hidden instead of hiding it.
+      var note = root.getAttribute("data-editor-note");
+      if (!show && note) {
+        list.textContent = "";
+        list.appendChild(el("p", "shopcare-pdp__editor-note", note));
+        root.hidden = false;
+        return;
+      }
       root.hidden = !show;
     }
 

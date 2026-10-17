@@ -343,6 +343,9 @@ async function pdpFromStorefrontData() {
 
   const hat = { id: 11, title: "Cap", tags: ["hats"], type: "Hats", collections: [] };
   assert.ok(!(await block("care_offer", {}, { product: hat, globals: { app } })).includes("data-care-offer"), "no plan applies: no block, no placeholders");
+  const editor = await block("care_offer", {}, { product: hat, globals: { app, request: { path: "/products/cap", design_mode: true } } });
+  assert.match(editor, /only you see this, in the theme editor\. No ShopCare Care plan covers this product/, "theme editor: says why it's hidden");
+  assert.ok(!editor.includes("data-care-offer"), "theme editor note isn't a working offer");
 
   const stale = { metafields: { shopcare: { storefront: { value: { ...STOREFRONT_DATA, v: 2 } } } } };
   const fallback = setup(
@@ -352,6 +355,17 @@ async function pdpFromStorefrontData() {
   fallback.run("shopcare-pdp.js");
   await tick();
   assert.ok(fallback.calls.some((c) => c.url.includes("/apps/repairs/care_plans")), "another data version: asks the app");
+
+  // Asking the app in the theme editor: no plans → the note, not a hidden block.
+  const editorFallback = setup(
+    `<form action="/cart/add"><input type="hidden" name="id" value="100"><button type="submit">Add</button></form>${await block("care_offer", {}, { product, globals: { app: stale, request: { path: "/products/boot", design_mode: true } } })}`,
+    [["/apps/repairs/care_plans", { ok: true, plans: [] }]]
+  );
+  editorFallback.run("shopcare-pdp.js");
+  await tick();
+  const editorCare = editorFallback.document.querySelector("[data-care-offer]");
+  assert.strictEqual(editorCare.hidden, false, "theme editor: shown");
+  assert.match(editorCare.querySelector(".shopcare-pdp__editor-note").textContent, /No ShopCare Care plan covers this product/);
 }
 
 // Photos go up as small JPEG thumbnails; one the browser can't draw goes as it is only if it's small.

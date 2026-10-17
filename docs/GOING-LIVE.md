@@ -164,6 +164,8 @@ ShopCare sends no email. Check each one in a dev store:
       `/apps/repairs/care_plans` request (the block reads the plans from the
       app's storefront metafield, published on install and after each Care
       plan save). Edit a plan → the product page shows the change on reload.
+- [ ] In the theme editor, open a product no plan covers: the block shows a
+      dashed note explaining why (customers see nothing there).
 - [ ] Buy a product with Care → the item shows Care cover; refund the product →
       the Care line is refunded (or a credit code issued, per Settings).
 - [ ] A covered repair: the £0 quote completes itself (no invoice) and the

@@ -127,7 +127,8 @@ Repair request      GET  /apps/repairs/orders            → /proxy/orders      
                     GET  /apps/repairs/catalog_search    → /proxy/catalog_search  (name / SKU; public catalogue facts; rate-limited)
                     POST /apps/repairs/order_lookup      → /proxy/order_lookup    (order no. + email, or own orders; rate-limited)
                     POST /apps/repairs/intake            → /proxy/intake
-Care                (Care offer: no call; plans come from app.metafields.shopcare.storefront)
+Care                (Care offer: no call; plans come from app.metafields.shopcare.storefront;
+                    in the theme editor, a product no plan covers shows a note saying so)
                     GET  /apps/repairs/care_plans        → /proxy/care_plans (fallback until that's published)
                     GET  /apps/repairs/care_offers       → /proxy/care_offers
 Repair status       GET  /apps/repairs/status            → /proxy/status

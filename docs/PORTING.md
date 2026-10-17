@@ -48,9 +48,10 @@ or `deferred`.
 | Solid Queue / Solid Cache / Puma / Docker | Netlify Functions | done | `Dockerfile` kept from the template for self-hosting only |
 | `Rails.cache` (product facts, catalogue, repair products) | `cache_entries` table, `PostgresCache` (app/lib/postgres-cache.server.ts) | done | default `ShopifyCache` outside Vitest (in-memory under Vitest); TTL per caller; DB errors = cache miss |
 | `ProxyThrottling` (Rails.cache counters) | `proxy_throttles` table, `postgresThrottleStore` | done | default outside Vitest |
-| — (v2) daily housekeeping | `netlify/functions/daily-prune.mts` → job `daily-prune` | done | 03:15 UTC: throttle rows older than a day, expired cache entries, jobs older than 7 days |
+| — (v2) daily housekeeping | `netlify/functions/daily-prune.mts` → job `daily-prune` | done | 03:15 UTC: throttle rows older than a day, expired cache entries, jobs older than 7 days; queues `storefront-sync` for every installed shop |
 | — (v2) saved jobs + sweep | `jobs` table, `app/lib/background.server.ts`, `netlify/functions/jobs-sweep.mts` | done | every `enqueue` is saved first and only its id is dispatched (256 KB background limit); claimed per run, deleted on success, backoff 1/2/10/30/120 min, `failed` + reported after 6 attempts; the sweep (every 5 min) sends due and crashed jobs again |
 | — (v2) error reporting | `app/lib/errors.server.ts` (`SENTRY_DSN`) | done | jobs that give up, failed dispatches and sweeps, loader/action errors (`handleError` in app/entry.server.tsx); tags only, no payloads |
+| — (v2) storefront data | `app/services/storefront/storefront-sync.server.ts` → job `storefront-sync` | done | publishes active Care plans + product rules as the `shopcare.storefront` app-data metafield and purges `shop:<domain>`; on install, after Care plan / product group / settings saves, and daily |
 | — (v2) stuck-notification sweep | `netlify/functions/hourly-notification-sweep.mts` → job `notification-sweep` | done | hourly at :20: re-enqueues `pending` deliveries 15 min–48 h old |
 | — (v2) email unsubscribe + suppression | removed 16-10-2026 (Shopify sends every email; see [Notifications](#notifications)) | removed | migration `…_shopify_sends_emails` drops `email_suppressions` |
 | — (v2) "Add Care" offer timing | `netlify/functions/daily-care-offers.mts` → job `care-offers` | done | 10:00 UTC: emits `care_offer` (Flow / Klaviyo) `care_offer_delay_days` (default 7) after purchase and syncs the `shopcare-care-offer-eligible` customer tag |
@@ -91,11 +92,15 @@ Netlify Function invocation, billed and with a cold-start risk.
   `logged_in_customer_id` (`orders`, `status`, `care_offers`, `quotes`), and no
   POSTs. A cache hit skips the signature check, so cached bodies must be data
   that is public anyway.
-- Tag responses `shop:<domain>` and purge with `purgeCache({ tags })` when a
-  merchant edits plans/programs, so short TTLs aren't needed.
-- Better still, move data that only changes when the merchant edits it into
-  shop/product **metafields** read by Liquid, so no proxy call happens at all.
-  Consider this for Care plan eligibility.
+- Tag responses `shop:<domain>`; the `storefront-sync` job purges the tag
+  (`purgeCache({ tags })`) after a merchant edits Care plans, product groups
+  or settings, so edits show at once.
+- Data that only changes when the merchant edits it lives in an app-data
+  **metafield** read by Liquid, so no proxy call happens at all: done for Care
+  plan eligibility (`app.metafields.shopcare.storefront`, see
+  app/services/storefront/storefront-sync.server.ts). The Care offer block
+  picks the plans in Liquid; `/proxy/care_plans` is only the fallback before
+  the metafield is published.
 - Webhooks: ack and enqueue (one function + one background invocation each).
 
 ## App Proxy routes

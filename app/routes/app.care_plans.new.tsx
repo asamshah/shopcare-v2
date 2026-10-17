@@ -10,6 +10,7 @@ import { flashUrl } from "../services/admin/flash.server";
 import { readForm } from "../services/admin/form.server";
 import { nextPlanPosition, type PlanValues, readPlan, termsPreview } from "../services/admin/care-plans.server";
 import { groupOptions } from "../services/admin/setup.server";
+import { storefrontChanged } from "../services/storefront/storefront-sync.server";
 
 const defaults = async (shopId: number): Promise<PlanValues> => ({
   name: "2-year Care",
@@ -47,6 +48,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     values,
     async () => {
       const plan = await createCarePlan({ shopId: shop.id, ...input });
+      await storefrontChanged(shop);
       return redirect(flashUrl(`/app/care_plans/${plan.id}`, { notice: "Care plan created." }));
     },
     extra,

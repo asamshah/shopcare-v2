@@ -397,7 +397,24 @@
       return card;
     }
 
-    getJSON(root.getAttribute("data-plans-url"))
+    // The block already picked the plans (from the app's storefront data), so
+    // there's nothing to ask the app; otherwise ask it.
+    function loadPlans() {
+      var inline = root.getAttribute("data-plans-json");
+      if (inline) {
+        try {
+          var title = root.getAttribute("data-product-title") || "item";
+          var plans = JSON.parse(inline).map(function (plan) {
+            plan.terms = (plan.terms || []).map(function (line) { return line.split("{product}").join(title); });
+            return plan;
+          });
+          return Promise.resolve({ ok: true, currency: root.getAttribute("data-currency"), plans: plans });
+        } catch (e) { /* fall through to the app */ }
+      }
+      return getJSON(root.getAttribute("data-plans-url"));
+    }
+
+    loadPlans()
       .then(function (data) {
         if (!data || !data.ok || !data.plans || !data.plans.length) { settle(false); return; }
         getJSON(root.getAttribute("data-cart-url") + ".js").then(function (cart) {

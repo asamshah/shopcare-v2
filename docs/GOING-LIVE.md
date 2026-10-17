@@ -160,6 +160,10 @@ ShopCare sends no email. Check each one in a dev store:
       link it in **Care plans → Add Care plan**.
 - [ ] Add the **Care offer** block to the product template and the **Add Care
       to a purchase** block to a page; put that page's URL in Settings → Care plans.
+- [ ] On a product page, the browser's network tab shows **no**
+      `/apps/repairs/care_plans` request (the block reads the plans from the
+      app's storefront metafield, published on install and after each Care
+      plan save). Edit a plan → the product page shows the change on reload.
 - [ ] Buy a product with Care → the item shows Care cover; refund the product →
       the Care line is refunded (or a credit code issued, per Settings).
 - [ ] A covered repair: the £0 quote completes itself (no invoice) and the

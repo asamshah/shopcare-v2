@@ -18,6 +18,7 @@ import {
 import { ensureCustomerSigningKey } from "../../shopify/customer-signing-key.server";
 import { queueOrderImport, type ImportOrdersDeps } from "../../jobs/import-orders.server";
 import { errorSummary, type AdminGraphqlClient } from "../../shopify/graphql.server";
+import { storefrontChanged } from "../storefront/storefront-sync.server";
 
 export async function setUpShopAfterAuth(
   shopDomain: string,
@@ -51,4 +52,6 @@ export async function setUpShopAfterAuth(
   } catch (error) {
     console.error(`[afterAuth] ${shopDomain}: order backfill not queued: ${errorSummary(error)}`);
   }
+  // Care plans for the product page block (never throws).
+  await storefrontChanged(shop);
 }

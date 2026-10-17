@@ -308,6 +308,52 @@ async function requestForm() {
   assert.strictEqual(root.querySelector("[data-status-link]").getAttribute("href"), "/pages/repair-status");
 }
 
+// With the app's storefront data (app.metafields.shopcare.storefront), the block picks the plans
+// in Liquid and the product page never calls the app.
+const STOREFRONT_DATA = {
+  v: 1,
+  currency: "GBP",
+  plans: [
+    { id: 1, name: "2-year Care", variant_id: "7001", price: "15.00", term_months: 24, benefits: ["Free repairs"], exclusions: [],
+      terms: ["All repairs to your {product} for 2 years, except: theft or loss."], rule: { type: "tags", tags: ["boots"] } },
+    { id: 2, name: "Leather Care", variant_id: "7002", price: "9.00", term_months: 12, benefits: [], exclusions: [], terms: [],
+      rule: { type: "collections", collection_ids: ["99"] } },
+    { id: 3, name: "Bag Care", variant_id: "7003", price: "5.00", term_months: 12, benefits: [], exclusions: [], terms: [],
+      rule: { type: "product_type", product_type: "bags" } },
+    { id: 4, name: "Everything Care", variant_id: "7004", price: "20.00", term_months: 36, benefits: [], exclusions: [], terms: [],
+      rule: { type: "none" } }
+  ]
+};
+
+async function pdpFromStorefrontData() {
+  const app = { metafields: { shopcare: { storefront: { value: STOREFRONT_DATA } } } };
+  const product = { id: 10, title: "Aria Boot", tags: ["Boots", "Sale"], type: "Footwear", collections: [{ id: 99 }, { id: 5 }] };
+  const env = setup(
+    `<form action="/cart/add" id="pf"><input type="hidden" name="id" value="100"><button type="submit">Add</button></form>${await block("care_offer", {}, { product, globals: { app } })}`,
+    [["/cart.js", { items: [] }]]
+  );
+  env.run("shopcare-pdp.js");
+  await tick();
+  const care = env.document.querySelector("[data-care-offer]");
+  const titles = [...care.querySelectorAll(".shopcare-pdp__card-title")].map((el) => el.textContent).filter((t) => t !== "What's covered");
+  assert.deepStrictEqual(titles.slice(0, 2), ["2-year Care", "Leather Care"], "tag (any case) and collection rules match; type and unknown rules don't");
+  assert.ok(!titles.includes("Bag Care") && !titles.includes("Everything Care"));
+  assert.match(care.textContent, /All repairs to your Aria Boot for 2 years/, "product title put into the terms");
+  assert.ok(!env.calls.some((c) => c.url.includes("/apps/repairs/care_plans")), "no app call");
+
+  const hat = { id: 11, title: "Cap", tags: ["hats"], type: "Hats", collections: [] };
+  assert.ok(!(await block("care_offer", {}, { product: hat, globals: { app } })).includes("data-care-offer"), "no plan applies: no block, no placeholders");
+
+  const stale = { metafields: { shopcare: { storefront: { value: { ...STOREFRONT_DATA, v: 2 } } } } };
+  const fallback = setup(
+    `<form action="/cart/add"><input type="hidden" name="id" value="100"><button type="submit">Add</button></form>${await block("care_offer", {}, { product, globals: { app: stale } })}`,
+    [["/apps/repairs/care_plans", { ok: true, plans: [] }]]
+  );
+  fallback.run("shopcare-pdp.js");
+  await tick();
+  assert.ok(fallback.calls.some((c) => c.url.includes("/apps/repairs/care_plans")), "another data version: asks the app");
+}
+
 // Photos go up as small JPEG thumbnails; one the browser can't draw goes as it is only if it's small.
 async function photoForm(stubs) {
   let posted = null;
@@ -735,6 +781,7 @@ describe("storefront: the theme extension in jsdom", () => {
   it("PDP: a section-rendered drawer is refreshed with the Section Rendering API", pdpSectionDrawer);
   it("PDP: no drawer recognised falls back to the cart page", pdpNoDrawer);
   it("Request form: repair journey submits to the intake endpoint, then shows the tracker", requestForm);
+  it("PDP: with the app's storefront data, plans are picked in Liquid and the app isn't called", pdpFromStorefrontData);
   it("Request form: photos are sent as 800 px JPEG thumbnails", photoThumbnails);
   it("Request form: a photo it can't shrink is sent only if it's small", photoFallback);
   it("Request form (logged out): log in back to this page, or continue without an account", loggedOutChoice);

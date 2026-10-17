@@ -37,6 +37,7 @@ import {
 } from "../services/emails/order-confirmation.server";
 import { OrderConfirmationSnippet, SHOPIFY_FLOW_URL, SHOPIFY_NOTIFICATIONS_URL } from "../components/order-confirmation-snippet";
 import { signedUrl } from "../lib/storage.server";
+import { storefrontChanged } from "../services/storefront/storefront-sync.server";
 
 const CHANNEL_LABELS: Record<string, string> = {
   flow: "Shopify Flow",
@@ -128,6 +129,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return redirectWithFlash("/app/settings", await sendKlaviyoTest(shop, field(form, "email")));
   }
   const result = await saveSettings(shop, form);
+  if (result.ok) await storefrontChanged(shop);
   return redirectWithFlash("/app/settings", result.ok ? { notice: "Settings saved." } : { alert: result.alert });
 };
 

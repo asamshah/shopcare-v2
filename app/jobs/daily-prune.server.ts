@@ -4,6 +4,7 @@ import { getStorage, type FileStorage } from "../lib/storage.server";
 import { settingsOf } from "../models/shop.server";
 import { EXPORT_RETENTION_DAYS } from "../services/gdpr/customer-export.server";
 import { PostgresCache } from "../lib/postgres-cache.server";
+import { storefrontChanged } from "../services/storefront/storefront-sync.server";
 import {
   postgresThrottleStore,
   THROTTLE_RETENTION_MS,
@@ -76,6 +77,9 @@ export async function pruneGdprExports(
 
 export async function dailyPruneJob(): Promise<void> {
   const removed = await pruneStaleRows();
+  // Republish every shop's storefront data, in case an edit's sync was lost.
+  const shops = await prisma.shop.findMany({ where: { uninstalledAt: null }, select: { id: true, shopifyDomain: true } });
+  for (const shop of shops) await storefrontChanged(shop);
   console.info(
     `[job:daily-prune] removed ${removed.throttles} throttle rows, ${removed.cacheEntries} cache entries, ${removed.exports} GDPR exports, ${removed.jobs} old jobs`,
   );

@@ -21,6 +21,7 @@ import { importOrdersJob } from "./import-orders.server";
 import { notificationJob } from "./notification.server";
 import { notificationSweepJob } from "./notification-sweep.server";
 import { outboundWebhookJob } from "./outbound-webhook.server";
+import { storefrontSyncJob } from "../services/storefront/storefront-sync.server";
 import { webhookJob } from "./webhook.server";
 
 export type JobPayload = Record<string, unknown>;
@@ -35,6 +36,7 @@ export const jobs = {
   notification: notificationJob,
   "notification-sweep": notificationSweepJob,
   "outbound-webhook": outboundWebhookJob,
+  "storefront-sync": storefrontSyncJob,
   webhook: webhookJob,
 } satisfies Record<string, JobHandler>;
 

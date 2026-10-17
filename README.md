@@ -47,9 +47,9 @@ app/
   db.server.ts       Prisma client
 netlify/functions/   jobs-background.mts (Background Function); Scheduled: jobs-sweep.mts
                      (every 5 min: sends saved jobs that are due again), daily-prune.mts
-                     (throttle + cache rows, old GDPR exports, jobs older than a week),
-                     daily-care-offers.mts ("Add Care" offer + customer tag),
-                     daily-expire-quotes.mts, hourly-notification-sweep.mts
+                     (throttle + cache rows, old GDPR exports, jobs older than a week; queues
+                     the storefront data resync), daily-care-offers.mts ("Add Care" offer +
+                     customer tag), daily-expire-quotes.mts, hourly-notification-sweep.mts
 prisma/              schema + migrations (Postgres; every Rails table, see docs/PORTING.md#schema-notes)
 extensions/          theme app extension + Flow triggers (from Rails, plus v2 repair-submitted, data-request)
 parked/              Flow trigger not yet shipped (trade-in status)

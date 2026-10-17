@@ -217,7 +217,26 @@ needs **new customer accounts** (otherwise use discount codes).
       the scheduled functions show under Netlify → Functions.
 
 ### Production
-- [ ] Apply for protected customer data access (PII + orders) for the public app.
+- [ ] **Apply for protected customer data access now** (Partner Dashboard →
+      ShopCare → API access → Protected customer data: name, email, address,
+      phone, plus orders). ShopCare stores customers' names, emails and
+      addresses on tickets, and approval is reviewed, not instant. Needed
+      before it's installed on stores other than your dev stores.
+- [ ] **Sentry:** create a project (free tier), set `SENTRY_DSN` (and
+      `SENTRY_ENVIRONMENT=production`) on Netlify, and turn on email alerts
+      for new issues. Without it, failed jobs only reach Netlify's function
+      logs. Failed jobs also stay in the `jobs` table for 7 days
+      (`status = 'failed'`, `last_error`).
+- [ ] **Netlify plan:** confirm it includes Background and Scheduled Functions,
+      and after the first week check Netlify → Usage (function invocations
+      and compute) and Neon → Usage.
+- [ ] **Neon:** on the production branch, turn off *scale to zero* (or accept
+      a cold start of well under a second after quiet spells; webhooks still
+      answer well inside Shopify's 5 s).
+- [ ] **Admin API version:** ShopCare pins 2026-10 (`app/shopify.server.ts`,
+      `[webhooks] api_version`). Shopify supports a version for about a year:
+      upgrade both by **mid-2027** (Partner Dashboard → API health lists any
+      deprecated calls).
 - [ ] Netlify Blobs holds photos and exports (nothing to configure on Netlify).
 
 ## Flow recipes (optional)

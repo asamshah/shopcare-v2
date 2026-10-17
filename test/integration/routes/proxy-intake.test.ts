@@ -136,6 +136,24 @@ describe("POST /proxy/intake", () => {
     expect(await prisma.ticketImage.count({ where: { repairTicketId: (await json(response)).ticket_id } })).toBe(2);
   });
 
+  it("never keeps more than 3 photos, even when max_images says more", async () => {
+    await prisma.shop.update({ where: { id: shop.id }, data: { settings: { intake: { max_images: 6 } } } });
+    const response = await post({
+      description: "Scuffs",
+      customer_email: "c@example.com",
+      "images[]": [pngFile("a.png"), pngFile("b.png"), pngFile("c.png"), pngFile("d.png")],
+    });
+    expect(await prisma.ticketImage.count({ where: { repairTicketId: (await json(response)).ticket_id } })).toBe(3);
+  });
+
+  it("drops a photo over 1 MB (the form sends thumbnails), keeping the ticket", async () => {
+    const png = Buffer.from(await pngFile().arrayBuffer());
+    const big = new File([png, Buffer.alloc(1024 * 1024)], "big.png", { type: "image/png" });
+    const response = await post({ description: "Scuffs", customer_email: "c@example.com", "images[]": [big, pngFile("ok.png")] });
+    const images = await prisma.ticketImage.findMany({ where: { repairTicketId: (await json(response)).ticket_id } });
+    expect(images.map((i) => i.filename)).toEqual(["ok.png"]);
+  });
+
   it("files a logged-in customer's own item with its cover, and logs the cover", async () => {
     const policy = await createWarrantyPolicyFor(shop, { name: "12-month warranty", months: 12 });
     const item = await createItemFor(shop, {
@@ -205,6 +223,16 @@ describe("POST /proxy/intake", () => {
 
     expect(response.status).toBe(422);
     expect((await json(response)).errors).toEqual([ALREADY_OPEN]);
+  });
+
+  it("files one ticket when the same item is submitted twice at once", async () => {
+    const item = await createItemFor(shop, { shopifyCustomerId: "777", orderLineId: "55" });
+    const form = { description: "Sole", customer_email: "c@example.com", item_id: String(item.id) };
+
+    const statuses = (await Promise.all([post(form), post(form)])).map((r) => r.status).sort();
+
+    expect(statuses).toEqual([200, 422]);
+    expect(await prisma.repairTicket.count({ where: { itemId: item.id } })).toBe(1);
   });
 
   it("records an unverified catalogue pick, the address and the order date", async () => {

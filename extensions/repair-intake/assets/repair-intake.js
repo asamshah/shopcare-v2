@@ -21,7 +21,9 @@
 
   function init(root) {
     var loggedIn = root.getAttribute("data-logged-in") === "true";
-    var maxImages = parseInt(root.getAttribute("data-max-images"), 10) || 6;
+    var MAX_IMAGES = 3; // the server keeps no more
+    var maxImages = parseInt(root.getAttribute("data-max-images"), 10);
+    maxImages = isNaN(maxImages) ? MAX_IMAGES : Math.min(Math.max(maxImages, 0), MAX_IMAGES);
     var urls = {
       intake: root.getAttribute("data-intake-url") || "/apps/repairs/intake",
       orders: root.getAttribute("data-orders-url") || "/apps/repairs/orders",
@@ -473,8 +475,19 @@
       if (btn) btn.disabled = true;
       setStatus("Sending your request…");
 
-      fetch(urls.intake, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } })
-        .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, body: data }; }); })
+      photoThumbnails()
+        .then(function (photos) {
+          var body = new FormData(form);
+          body.delete("images[]");
+          photos.forEach(function (p) { body.append("images[]", p.blob, p.name); });
+          return fetch(urls.intake, { method: "POST", body: body, headers: { Accept: "application/json" } });
+        })
+        .then(function (r) {
+          return r.json().then(
+            function (data) { return { ok: r.ok, body: data }; },
+            function () { return { ok: false, body: { errors: [r.status === 413 ? PHOTO_ERROR : "Something went wrong. Please try again."] } }; }
+          );
+        })
         .then(function (res) {
           if (res.ok && res.body && res.body.ok) {
             confirmed(res.body.ticket_id);
@@ -483,8 +496,62 @@
             setStatus(errors.length ? errors.join(" ") : "Something went wrong. Please try again.", true);
           }
         })
-        .catch(function () { setStatus("Couldn't reach the server. Please try again.", true); })
+        .catch(function (error) { setStatus(error && error.photo ? PHOTO_ERROR : "Couldn't reach the server. Please try again.", true); })
         .finally(function () { if (btn) btn.disabled = false; });
+    }
+
+    // ── Photos: sent as small JPEG thumbnails ──────────────────────────────
+    // The request has to stay small (the app's server takes a few MB per
+    // request), and staff only need to see the damage. A photo the browser
+    // can't draw (HEIC outside Safari) is sent as it is if it's small enough.
+    var THUMB_EDGE = 800; // px, the longer side
+    var THUMB_QUALITY = 0.8;
+    var MAX_ORIGINAL_BYTES = 1024 * 1024; // the server's limit per photo
+    var PHOTO_ERROR = "One of your photos couldn't be used. Please choose JPEG or PNG photos, or leave them out.";
+
+    function photoThumbnails() {
+      var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files, 0, maxImages) : [];
+      return Promise.all(files.map(function (file, i) {
+        return thumbnail(file).then(
+          function (blob) { return { blob: blob, name: "photo-" + (i + 1) + ".jpg" }; },
+          function () {
+            if (file.size > 0 && file.size <= MAX_ORIGINAL_BYTES) return { blob: file, name: file.name };
+            throw { photo: true };
+          }
+        );
+      }));
+    }
+
+    function thumbnail(file) {
+      var canvas = document.createElement("canvas");
+      var ctx = canvas.getContext && canvas.getContext("2d");
+      if (!ctx || !canvas.toBlob) return Promise.reject(new Error("no canvas"));
+      return decode(file).then(function (image) {
+        var w = image.width, h = image.height;
+        if (!w || !h) throw new Error("empty image");
+        var scale = Math.min(1, THUMB_EDGE / Math.max(w, h));
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        ctx.fillStyle = "#fff"; // transparent PNGs get a white background, not black
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        if (image.close) image.close();
+        return new Promise(function (resolve, reject) {
+          canvas.toBlob(function (blob) { blob ? resolve(blob) : reject(new Error("toBlob failed")); }, "image/jpeg", THUMB_QUALITY);
+        });
+      });
+    }
+
+    // Browsers apply the photo's EXIF rotation when decoding, so thumbnails come out upright.
+    function decode(file) {
+      if (window.createImageBitmap) return window.createImageBitmap(file);
+      return new Promise(function (resolve, reject) {
+        var url = URL.createObjectURL(file);
+        var img = new Image();
+        img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("not an image")); };
+        img.src = url;
+      });
     }
 
     root.querySelectorAll("[data-next]").forEach(function (b) {

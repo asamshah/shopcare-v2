@@ -308,6 +308,58 @@ async function requestForm() {
   assert.strictEqual(root.querySelector("[data-status-link]").getAttribute("href"), "/pages/repair-status");
 }
 
+// Photos go up as small JPEG thumbnails; one the browser can't draw goes as it is only if it's small.
+async function photoForm(stubs) {
+  let posted = null;
+  const env = setup(await block("repair_form"), [
+    ["/apps/repairs/orders", { ok: true, products: [] }],
+    ["/apps/repairs/intake", (url, opts) => { posted = opts.body; return { ok: true, ticket_id: 1 }; }]
+  ]);
+  stubs(env.window);
+  env.run("repair-intake.js");
+  await tick();
+  const root = env.document.querySelector("[data-repair-intake]");
+  const choose = (files) => Object.defineProperty(root.querySelector("[data-repair-images]"), "files", { value: files, configurable: true });
+  const submit = async () => {
+    root.querySelector('[name="description"]').value = "Sole peeling";
+    root.querySelector("[data-repair-form]").dispatchEvent(new env.window.Event("submit", { bubbles: true, cancelable: true }));
+    await tick();
+  };
+  return { env, root, choose, submit, posted: () => posted };
+}
+
+async function photoThumbnails() {
+  const drawn = [];
+  const form = await photoForm((window) => {
+    window.createImageBitmap = async () => ({ width: 4000, height: 3000, close() {} });
+    window.HTMLCanvasElement.prototype.getContext = function () {
+      const canvas = this;
+      return { fillRect() {}, drawImage: (img, x, y, w, h) => drawn.push([canvas.width, canvas.height, w, h]) };
+    };
+    window.HTMLCanvasElement.prototype.toBlob = function (cb, type) { cb(new window.Blob(["thumb"], { type })); };
+  });
+  const { window } = form.env;
+  form.choose([new window.File(["x".repeat(5_000_000)], "IMG_1.jpg", { type: "image/jpeg" }), new window.File(["y"], "IMG_2.png", { type: "image/png" })]);
+  await form.submit();
+  const images = form.posted().getAll("images[]");
+  assert.deepStrictEqual(images.map((f) => [f.name, f.type, f.size]), [["photo-1.jpg", "image/jpeg", 5], ["photo-2.jpg", "image/jpeg", 5]], "thumbnails, not the originals");
+  assert.deepStrictEqual(drawn[0], [800, 600, 800, 600], "longer side scaled to 800 px");
+}
+
+async function photoFallback() {
+  const stubs = (window) => { window.createImageBitmap = () => Promise.reject(new Error("HEIC")); };
+  const small = await photoForm(stubs);
+  small.choose([new small.env.window.File(["z".repeat(1000)], "IMG_3.heic", { type: "image/heic" })]);
+  await small.submit();
+  assert.deepStrictEqual(small.posted().getAll("images[]").map((f) => [f.name, f.size]), [["IMG_3.heic", 1000]], "small undrawable photo sent as it is");
+
+  const big = await photoForm(stubs);
+  big.choose([new big.env.window.File(["z".repeat(2 * 1024 * 1024)], "IMG_4.heic", { type: "image/heic" })]);
+  await big.submit();
+  assert.strictEqual(big.posted(), null, "a big photo it can't shrink isn't sent");
+  assert.match(big.root.querySelector(".repair-intake__status").textContent, /photos couldn't be used/);
+}
+
 // A guest: log in (back to this page, classic and new customer accounts) or carry on.
 async function loggedOutChoice() {
   const env = setup(await block("repair_form", {}, { customer: null }), []);
@@ -683,6 +735,8 @@ describe("storefront: the theme extension in jsdom", () => {
   it("PDP: a section-rendered drawer is refreshed with the Section Rendering API", pdpSectionDrawer);
   it("PDP: no drawer recognised falls back to the cart page", pdpNoDrawer);
   it("Request form: repair journey submits to the intake endpoint, then shows the tracker", requestForm);
+  it("Request form: photos are sent as 800 px JPEG thumbnails", photoThumbnails);
+  it("Request form: a photo it can't shrink is sent only if it's small", photoFallback);
   it("Request form (logged out): log in back to this page, or continue without an account", loggedOutChoice);
   it("Request form (logged in): profile, Care / warranty / no-cover badges, show more, open repair blocked", profileCards);
   it("Request form: catalogue search (combobox, keyboard), filed as an unverified purchase", catalogueSearch);

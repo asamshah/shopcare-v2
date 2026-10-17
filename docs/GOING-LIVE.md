@@ -78,7 +78,9 @@ To demo sooner, place a recent order (within 60 days) for the customer account.
 
 ### App Proxy (storefront)
 - `/apps/repairs/intake` → `/proxy/intake` (create ticket; 10 per hour per
-  visitor, 300 per shop; photos must really be JPEG/PNG/WebP/HEIC)
+  visitor, 300 per shop; up to 3 photos, which the form shrinks to 800 px
+  JPEG thumbnails; each must really be JPEG/PNG/WebP/HEIC and under 1 MB, so
+  the request fits Netlify's ~6 MB function limit)
 - `/apps/repairs/orders` → `/proxy/orders` (purchase history)
 - `/apps/repairs/status` → `/proxy/status` (JSON for the **Repair status** block)
 - `/apps/repairs/quotes/:token` (+ `/decline`) → the quote review page,

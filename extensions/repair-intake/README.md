@@ -87,7 +87,9 @@ item: on submit the server re-checks it (the customer's own items, or the signed
 token a guest's order lookup returned), refuses anything it can't verify, and
 refuses a second request while the item's repair is open.
 
-**2. The issue** (description, photos) and **3. Your details** (name, email, phone,
+**2. The issue** (description, up to 3 photos, sent as 800 px JPEG thumbnails
+drawn in the browser; one it can't draw, such as HEIC outside Safari, is sent
+as it is only if it's under 1 MB) and **3. Your details** (name, email, phone,
 return address; prefilled from the customer's account and editable). Each label's
 text is one element, so a required “*” can't wrap and push Email below Name.
 

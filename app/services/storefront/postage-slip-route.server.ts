@@ -2,8 +2,8 @@
  * GET /apps/repairs/tickets/:id/postage-slip → the ticket's postage slip PDF
  * (repairs/postage-slip.server.ts), for the customer to print.
  *
- * Who gets it: anyone holding a valid signed link (the "Send your item to us"
- * email's, valid POSTAGE_LINK_DAYS, so guests can download it; or the Repair
+ * Who gets it: anyone holding a valid signed link (the one in Shopify's order
+ * confirmation, valid POSTAGE_LINK_DAYS, so guests can download it; or the Repair
  * status block's, valid a day), else the logged-in customer who owns the
  * ticket. Everyone else sees "not found", whether or not the ticket exists.
  * Only while the ticket awaits its item. Private and never cached.
@@ -49,7 +49,7 @@ export function postageSlipDownload(args: Args) {
           ? message(
               ctx,
               410,
-              "This link has expired. Log in to your account to download the postage slip from your repairs, or reply to our email for a new one.",
+              "This link has expired. Log in to your account to download the postage slip from your repairs, or contact us for a new link.",
             )
           : message(ctx, 404, NOT_FOUND);
       }
@@ -65,7 +65,7 @@ export function postageSlipDownload(args: Args) {
       );
     }
     if (!completeWorkshopAddress(ctx.shopRecord)) {
-      return message(ctx, 409, "Your postage slip isn't ready yet. We'll email it to you as soon as it is.");
+      return message(ctx, 409, "Your postage slip isn't ready yet. Please check back soon, or contact us.");
     }
     const file = await ensurePostageSlip(ctx.shopRecord, ticket.id, {
       storage: ctx.deps.storage(),

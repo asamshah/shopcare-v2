@@ -289,3 +289,13 @@
   font-weight: bolder;
   letter-spacing: 0.05em;
 }
+
+/* Theme editor only: why the Care offer is hidden on this product. */
+.shopcare-pdp__editor-note {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px dashed currentColor;
+  border-radius: 0.5rem;
+  color: var(--shopcare-muted);
+  font-size: 0.875em;
+}

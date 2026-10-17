@@ -2,10 +2,12 @@
  * The webhook pattern (docs/BACKGROUND-WORK.md): verify, ack fast, defer.
  *
  * Shopify expects a 2xx within 5 seconds and retries otherwise, so a route
- * checks the HMAC, does at most a quick inline step (a single DB write), and
- * hands anything slower (Admin API calls, emails, Flow triggers) to the
- * `webhook` background job. Duplicate deliveries happen, so handlers must be
- * idempotent; the X-Shopify-Webhook-Id header is passed along for dedupe.
+ * checks the HMAC and hands everything slow (Admin API calls, Flow triggers)
+ * to the `webhook` background job. `enqueue` saves the job (payload included)
+ * before answering, so the delivery can't be lost once acked; if it can't be
+ * saved the route fails and Shopify delivers again. Duplicate deliveries
+ * happen, so handlers must be idempotent; the X-Shopify-Webhook-Id header is
+ * passed along for dedupe.
  */
 import { authenticate } from "../shopify.server";
 import { enqueue } from "./background.server";

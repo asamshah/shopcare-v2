@@ -14,7 +14,7 @@ import {
 import type { JobPayload } from "../../jobs/registry.server";
 import { getStorage, type FileStorage } from "../../lib/storage.server";
 import { jsonResponse } from "../../lib/http.server";
-import type { AdminGraphqlClient } from "../../shopify/graphql.server";
+import { STOREFRONT_RETRY, withRetry, type AdminGraphqlClient } from "../../shopify/graphql.server";
 import { getNotificationDeps, type NotificationDeps } from "../notifications.server";
 import { declineQuote, expireQuote } from "../quotes/decision.server";
 
@@ -35,9 +35,9 @@ const defaults: StorefrontDeps = {
   async adminClient(ctx) {
     if (process.env.VITEST)
       throw new Error("Storefront routes call Shopify: configureStorefront({ adminClient }) in tests.");
-    if (ctx.admin) return ctx.admin;
+    if (ctx.admin) return withRetry(ctx.admin, STOREFRONT_RETRY);
     const { adminClientForShop } = await import("../../shopify/client.server");
-    return adminClientForShop(ctx.shop);
+    return withRetry(await adminClientForShop(ctx.shop), STOREFRONT_RETRY);
   },
   storage: () => getStorage(),
   notifications: () => getNotificationDeps(),

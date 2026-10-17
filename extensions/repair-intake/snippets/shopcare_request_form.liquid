@@ -20,6 +20,8 @@
 {%- endcomment -%}
 
 {%- assign uid = block.id | default: 'form' -%}
+{%- comment -%} At most 3 photos (the server keeps no more), whatever a block saved before the limit. {%- endcomment -%}
+{%- assign max_images = block.settings.max_images | default: 3 | at_most: 3 -%}
 {%- assign address = customer.default_address -%}
 {%- capture customer_query -%}{% render 'shopcare_customer_query', customer: customer, app: app %}{%- endcapture -%}
 <div
@@ -30,7 +32,7 @@
   data-catalog-url="/apps/repairs/catalog_search"
   data-lookup-url="/apps/repairs/order_lookup{% if customer_query != blank %}?{{ customer_query | escape }}{% endif %}"
   data-logged-in="{% if customer %}true{% else %}false{% endif %}"
-  data-max-images="{{ block.settings.max_images | default: 6 }}"
+  data-max-images="{{ max_images }}"
 >
   {%- if block.settings.heading != blank -%}
     <h2 class="repair-intake__heading">{{ block.settings.heading }}</h2>
@@ -162,7 +164,7 @@
       <label class="repair-intake__label">
         <span>Photos</span>
         <input type="file" name="images[]" accept="image/*" multiple data-repair-images>
-        <small class="repair-intake__hint">Add up to {{ block.settings.max_images | default: 6 }} photos.</small>
+        <small class="repair-intake__hint">Add up to {{ max_images }} {% if max_images == 1 %}photo{% else %}photos{% endif %}.</small>
       </label>
 
       <div class="repair-intake__actions">

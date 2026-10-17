@@ -19,7 +19,7 @@ import type { Cover, Prisma, RepairTicket, Shop } from "@prisma/client";
 import prisma from "../../db.server";
 import type { JobPayload } from "../../jobs/registry.server";
 import { emitOutboundWebhook } from "../../jobs/outbound-webhook.server";
-import type { Db } from "../../lib/db-lock.server";
+import { withRowLock, type Db } from "../../lib/db-lock.server";
 import { castBoolean } from "../../lib/inflections";
 import type { FileStorage } from "../../lib/storage.server";
 import { coverName, coverOutcomeLabel } from "../../models/cover.server";
@@ -32,14 +32,20 @@ import {
 import { adminTicketUrl, repairStatusUrl, settingsOf } from "../../models/shop.server";
 import { createTicketActivity } from "../../models/ticket-activity.server";
 import { sniffImageType } from "../../lib/image-type";
-import { createTicketImage, MAX_BYTES, validateTicketImage } from "../../models/ticket-image.server";
+import { createTicketImage, validateTicketImage } from "../../models/ticket-image.server";
 import { ValidationError } from "../../models/validation.server";
 import { emitNotification, type NotificationDeps } from "../notifications.server";
 import { loadNotificationSettings } from "../notifications/shop-settings.server";
 import type { ItemResolver } from "../storefront/owned-item-resolver.server";
 import { verifiedOrderId } from "./order-lookup.server";
 
-export const DEFAULT_MAX_IMAGES = 6;
+/** Photos kept per request: `settings.intake.max_images` can lower it, never raise it. */
+export const MAX_IMAGES = 3;
+/**
+ * Bytes per photo. The form sends ~800 px JPEG thumbnails (repair-intake.js),
+ * and the whole request has to fit Netlify's ~6 MB function limit.
+ */
+export const MAX_PHOTO_BYTES = 1024 * 1024;
 export const UNVERIFIED =
   "We couldn't confirm that purchase. Please choose it again, or describe the item instead.";
 export const ALREADY_OPEN = "A repair is already open for this item. We'll be in touch about it.";
@@ -129,16 +135,18 @@ export async function submitIntake(
   const chosen = itemChosen(params);
   const item = chosen ? await resolveItem(shop, params, customerId, options.itemResolver, db) : null;
   if (chosen && !item) return { ok: false, errors: [UNVERIFIED] };
-  if (item) {
-    const open = await db.repairTicket.count({
-      where: { shopId: shop.id, itemId: item.id, ...openWhere },
-    });
-    if (open > 0) return { ok: false, errors: [ALREADY_OPEN] };
-  }
 
-  let ticket: RepairTicket;
+  let ticket: RepairTicket | null;
   try {
     ticket = await db.$transaction(async (tx) => {
+      if (item) {
+        // The item's row lock makes a double-submitted form wait, so it sees the first ticket.
+        await withRowLock(tx, "items", item.id);
+        const open = await tx.repairTicket.count({
+          where: { shopId: shop.id, itemId: item.id, ...openWhere },
+        });
+        if (open > 0) return null;
+      }
       const link = item ? linkItem(item, now) : {};
       const created = await createRepairTicket(
         { ...ticketAttributes(shop, params, customerId), ...itemAttributes(item), ...link },
@@ -174,6 +182,7 @@ export async function submitIntake(
     }
     throw error;
   }
+  if (!ticket) return { ok: false, errors: [ALREADY_OPEN] };
 
   await attachImages(shop, ticket, options.images ?? [], options.storage, db, logger);
   await announce(shop, ticket, options, logger);
@@ -306,8 +315,8 @@ async function logCover(ticketId: number, cover: Cover, db: Db) {
 
 function maxImages(shop: Shop): number {
   const intake = settingsOf(shop).intake as Record<string, unknown> | undefined;
-  const value = parseInt(String(intake?.max_images ?? DEFAULT_MAX_IMAGES), 10);
-  return Number.isNaN(value) ? DEFAULT_MAX_IMAGES : value;
+  const value = parseInt(String(intake?.max_images ?? MAX_IMAGES), 10);
+  return Number.isNaN(value) ? MAX_IMAGES : Math.min(Math.max(value, 0), MAX_IMAGES);
 }
 
 function isUpload(value: unknown): value is IntakeUpload {
@@ -326,7 +335,7 @@ function safeFilename(name: string): string {
 
 /**
  * Best effort: a rejected file (not really a JPEG/PNG/WebP/HEIC photo, too
- * big) doesn't fail the ticket.
+ * big: over MAX_PHOTO_BYTES) doesn't fail the ticket.
  */
 async function attachImages(
   shop: Shop,
@@ -338,7 +347,7 @@ async function attachImages(
 ) {
   const uploads = images.filter((image) => !blank(image)).slice(0, maxImages(shop));
   for (const upload of uploads) {
-    if (!isUpload(upload) || upload.size === 0 || upload.size > MAX_BYTES) continue;
+    if (!isUpload(upload) || upload.size === 0 || upload.size > MAX_PHOTO_BYTES) continue;
     const filename = safeFilename(upload.name);
     const storageKey = `shops/${shop.id}/tickets/${ticket.id}/${randomUUID()}-${filename}`;
     try {

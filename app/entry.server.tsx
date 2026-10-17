@@ -2,11 +2,21 @@ import { PassThrough } from "stream";
 import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
 import { createReadableStreamFromReadable } from "@react-router/node";
-import { type EntryContext } from "react-router";
+import { type EntryContext, type HandleErrorFunction } from "react-router";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+import { reportError } from "./lib/errors.server";
 
 export const streamTimeout = 5000;
+
+/**
+ * Unexpected loader/action errors (not thrown Responses, not aborted
+ * requests) go to the error reporter (Sentry when SENTRY_DSN is set).
+ */
+export const handleError: HandleErrorFunction = (error, { request }) => {
+  if (request.signal.aborted) return;
+  void reportError(error, { area: "route", method: request.method, path: new URL(request.url).pathname });
+};
 
 export default async function handleRequest(
   request: Request,

@@ -308,6 +308,118 @@ async function requestForm() {
   assert.strictEqual(root.querySelector("[data-status-link]").getAttribute("href"), "/pages/repair-status");
 }
 
+// With the app's storefront data (app.metafields.shopcare.storefront), the block picks the plans
+// in Liquid and the product page never calls the app.
+const STOREFRONT_DATA = {
+  v: 1,
+  currency: "GBP",
+  plans: [
+    { id: 1, name: "2-year Care", variant_id: "7001", price: "15.00", term_months: 24, benefits: ["Free repairs"], exclusions: [],
+      terms: ["All repairs to your {product} for 2 years, except: theft or loss."], rule: { type: "tags", tags: ["boots"] } },
+    { id: 2, name: "Leather Care", variant_id: "7002", price: "9.00", term_months: 12, benefits: [], exclusions: [], terms: [],
+      rule: { type: "collections", collection_ids: ["99"] } },
+    { id: 3, name: "Bag Care", variant_id: "7003", price: "5.00", term_months: 12, benefits: [], exclusions: [], terms: [],
+      rule: { type: "product_type", product_type: "bags" } },
+    { id: 4, name: "Everything Care", variant_id: "7004", price: "20.00", term_months: 36, benefits: [], exclusions: [], terms: [],
+      rule: { type: "none" } }
+  ]
+};
+
+async function pdpFromStorefrontData() {
+  const app = { metafields: { shopcare: { storefront: { value: STOREFRONT_DATA } } } };
+  const product = { id: 10, title: "Aria Boot", tags: ["Boots", "Sale"], type: "Footwear", collections: [{ id: 99 }, { id: 5 }] };
+  const env = setup(
+    `<form action="/cart/add" id="pf"><input type="hidden" name="id" value="100"><button type="submit">Add</button></form>${await block("care_offer", {}, { product, globals: { app } })}`,
+    [["/cart.js", { items: [] }]]
+  );
+  env.run("shopcare-pdp.js");
+  await tick();
+  const care = env.document.querySelector("[data-care-offer]");
+  const titles = [...care.querySelectorAll(".shopcare-pdp__card-title")].map((el) => el.textContent).filter((t) => t !== "What's covered");
+  assert.deepStrictEqual(titles.slice(0, 2), ["2-year Care", "Leather Care"], "tag (any case) and collection rules match; type and unknown rules don't");
+  assert.ok(!titles.includes("Bag Care") && !titles.includes("Everything Care"));
+  assert.match(care.textContent, /All repairs to your Aria Boot for 2 years/, "product title put into the terms");
+  assert.ok(!env.calls.some((c) => c.url.includes("/apps/repairs/care_plans")), "no app call");
+
+  const hat = { id: 11, title: "Cap", tags: ["hats"], type: "Hats", collections: [] };
+  assert.ok(!(await block("care_offer", {}, { product: hat, globals: { app } })).includes("data-care-offer"), "no plan applies: no block, no placeholders");
+  const editor = await block("care_offer", {}, { product: hat, globals: { app, request: { path: "/products/cap", design_mode: true } } });
+  assert.match(editor, /only you see this, in the theme editor\. No ShopCare Care plan covers this product/, "theme editor: says why it's hidden");
+  assert.ok(!editor.includes("data-care-offer"), "theme editor note isn't a working offer");
+
+  const stale = { metafields: { shopcare: { storefront: { value: { ...STOREFRONT_DATA, v: 2 } } } } };
+  const fallback = setup(
+    `<form action="/cart/add"><input type="hidden" name="id" value="100"><button type="submit">Add</button></form>${await block("care_offer", {}, { product, globals: { app: stale } })}`,
+    [["/apps/repairs/care_plans", { ok: true, plans: [] }]]
+  );
+  fallback.run("shopcare-pdp.js");
+  await tick();
+  assert.ok(fallback.calls.some((c) => c.url.includes("/apps/repairs/care_plans")), "another data version: asks the app");
+
+  // Asking the app in the theme editor: no plans → the note, not a hidden block.
+  const editorFallback = setup(
+    `<form action="/cart/add"><input type="hidden" name="id" value="100"><button type="submit">Add</button></form>${await block("care_offer", {}, { product, globals: { app: stale, request: { path: "/products/boot", design_mode: true } } })}`,
+    [["/apps/repairs/care_plans", { ok: true, plans: [] }]]
+  );
+  editorFallback.run("shopcare-pdp.js");
+  await tick();
+  const editorCare = editorFallback.document.querySelector("[data-care-offer]");
+  assert.strictEqual(editorCare.hidden, false, "theme editor: shown");
+  assert.match(editorCare.querySelector(".shopcare-pdp__editor-note").textContent, /No ShopCare Care plan covers this product/);
+}
+
+// Photos go up as small JPEG thumbnails; one the browser can't draw goes as it is only if it's small.
+async function photoForm(stubs) {
+  let posted = null;
+  const env = setup(await block("repair_form"), [
+    ["/apps/repairs/orders", { ok: true, products: [] }],
+    ["/apps/repairs/intake", (url, opts) => { posted = opts.body; return { ok: true, ticket_id: 1 }; }]
+  ]);
+  stubs(env.window);
+  env.run("repair-intake.js");
+  await tick();
+  const root = env.document.querySelector("[data-repair-intake]");
+  const choose = (files) => Object.defineProperty(root.querySelector("[data-repair-images]"), "files", { value: files, configurable: true });
+  const submit = async () => {
+    root.querySelector('[name="description"]').value = "Sole peeling";
+    root.querySelector("[data-repair-form]").dispatchEvent(new env.window.Event("submit", { bubbles: true, cancelable: true }));
+    await tick();
+  };
+  return { env, root, choose, submit, posted: () => posted };
+}
+
+async function photoThumbnails() {
+  const drawn = [];
+  const form = await photoForm((window) => {
+    window.createImageBitmap = async () => ({ width: 4000, height: 3000, close() {} });
+    window.HTMLCanvasElement.prototype.getContext = function () {
+      const canvas = this;
+      return { fillRect() {}, drawImage: (img, x, y, w, h) => drawn.push([canvas.width, canvas.height, w, h]) };
+    };
+    window.HTMLCanvasElement.prototype.toBlob = function (cb, type) { cb(new window.Blob(["thumb"], { type })); };
+  });
+  const { window } = form.env;
+  form.choose([new window.File(["x".repeat(5_000_000)], "IMG_1.jpg", { type: "image/jpeg" }), new window.File(["y"], "IMG_2.png", { type: "image/png" })]);
+  await form.submit();
+  const images = form.posted().getAll("images[]");
+  assert.deepStrictEqual(images.map((f) => [f.name, f.type, f.size]), [["photo-1.jpg", "image/jpeg", 5], ["photo-2.jpg", "image/jpeg", 5]], "thumbnails, not the originals");
+  assert.deepStrictEqual(drawn[0], [800, 600, 800, 600], "longer side scaled to 800 px");
+}
+
+async function photoFallback() {
+  const stubs = (window) => { window.createImageBitmap = () => Promise.reject(new Error("HEIC")); };
+  const small = await photoForm(stubs);
+  small.choose([new small.env.window.File(["z".repeat(1000)], "IMG_3.heic", { type: "image/heic" })]);
+  await small.submit();
+  assert.deepStrictEqual(small.posted().getAll("images[]").map((f) => [f.name, f.size]), [["IMG_3.heic", 1000]], "small undrawable photo sent as it is");
+
+  const big = await photoForm(stubs);
+  big.choose([new big.env.window.File(["z".repeat(2 * 1024 * 1024)], "IMG_4.heic", { type: "image/heic" })]);
+  await big.submit();
+  assert.strictEqual(big.posted(), null, "a big photo it can't shrink isn't sent");
+  assert.match(big.root.querySelector(".repair-intake__status").textContent, /photos couldn't be used/);
+}
+
 // A guest: log in (back to this page, classic and new customer accounts) or carry on.
 async function loggedOutChoice() {
   const env = setup(await block("repair_form", {}, { customer: null }), []);
@@ -683,6 +795,9 @@ describe("storefront: the theme extension in jsdom", () => {
   it("PDP: a section-rendered drawer is refreshed with the Section Rendering API", pdpSectionDrawer);
   it("PDP: no drawer recognised falls back to the cart page", pdpNoDrawer);
   it("Request form: repair journey submits to the intake endpoint, then shows the tracker", requestForm);
+  it("PDP: with the app's storefront data, plans are picked in Liquid and the app isn't called", pdpFromStorefrontData);
+  it("Request form: photos are sent as 800 px JPEG thumbnails", photoThumbnails);
+  it("Request form: a photo it can't shrink is sent only if it's small", photoFallback);
   it("Request form (logged out): log in back to this page, or continue without an account", loggedOutChoice);
   it("Request form (logged in): profile, Care / warranty / no-cover badges, show more, open repair blocked", profileCards);
   it("Request form: catalogue search (combobox, keyboard), filed as an unverified purchase", catalogueSearch);

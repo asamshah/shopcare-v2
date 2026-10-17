@@ -78,7 +78,9 @@ To demo sooner, place a recent order (within 60 days) for the customer account.
 
 ### App Proxy (storefront)
 - `/apps/repairs/intake` → `/proxy/intake` (create ticket; 10 per hour per
-  visitor, 300 per shop; photos must really be JPEG/PNG/WebP/HEIC)
+  visitor, 300 per shop; up to 3 photos, which the form shrinks to 800 px
+  JPEG thumbnails; each must really be JPEG/PNG/WebP/HEIC and under 1 MB, so
+  the request fits Netlify's ~6 MB function limit)
 - `/apps/repairs/orders` → `/proxy/orders` (purchase history)
 - `/apps/repairs/status` → `/proxy/status` (JSON for the **Repair status** block)
 - `/apps/repairs/quotes/:token` (+ `/decline`) → the quote review page,
@@ -158,6 +160,14 @@ ShopCare sends no email. Check each one in a dev store:
       link it in **Care plans → Add Care plan**.
 - [ ] Add the **Care offer** block to the product template and the **Add Care
       to a purchase** block to a page; put that page's URL in Settings → Care plans.
+- [ ] On a product page, the browser's network tab shows **no**
+      `/apps/repairs/care_plans` request (the block reads the plans from the
+      app's storefront metafield, published on install and after each Care
+      plan save). Edit a plan → the product page shows the change on reload.
+- [ ] In the theme editor, open a product no plan covers: the block shows a
+      dashed note explaining why (customers see nothing there).
+- [ ] Change the Care product's price in Shopify: the product page shows the
+      new price after the next sync (daily, or at once after any Care plan save).
 - [ ] Buy a product with Care → the item shows Care cover; refund the product →
       the Care line is refunded (or a credit code issued, per Settings).
 - [ ] A covered repair: the £0 quote completes itself (no invoice) and the
@@ -211,7 +221,26 @@ needs **new customer accounts** (otherwise use discount codes).
       the scheduled functions show under Netlify → Functions.
 
 ### Production
-- [ ] Apply for protected customer data access (PII + orders) for the public app.
+- [ ] **Apply for protected customer data access now** (Partner Dashboard →
+      ShopCare → API access → Protected customer data: name, email, address,
+      phone, plus orders). ShopCare stores customers' names, emails and
+      addresses on tickets, and approval is reviewed, not instant. Needed
+      before it's installed on stores other than your dev stores.
+- [ ] **Sentry:** create a project (free tier), set `SENTRY_DSN` (and
+      `SENTRY_ENVIRONMENT=production`) on Netlify, and turn on email alerts
+      for new issues. Without it, failed jobs only reach Netlify's function
+      logs. Failed jobs also stay in the `jobs` table for 7 days
+      (`status = 'failed'`, `last_error`).
+- [ ] **Netlify plan:** confirm it includes Background and Scheduled Functions,
+      and after the first week check Netlify → Usage (function invocations
+      and compute) and Neon → Usage.
+- [ ] **Neon:** on the production branch, turn off *scale to zero* (or accept
+      a cold start of well under a second after quiet spells; webhooks still
+      answer well inside Shopify's 5 s).
+- [ ] **Admin API version:** ShopCare pins 2026-10 (`app/shopify.server.ts`,
+      `[webhooks] api_version`). Shopify supports a version for about a year:
+      upgrade both by **mid-2027** (Partner Dashboard → API health lists any
+      deprecated calls).
 - [ ] Netlify Blobs holds photos and exports (nothing to configure on Netlify).
 
 ## Flow recipes (optional)

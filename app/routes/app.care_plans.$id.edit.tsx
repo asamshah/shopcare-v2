@@ -13,6 +13,7 @@ import { field, readForm } from "../services/admin/form.server";
 import { planValues, readPlan, termsPreview } from "../services/admin/care-plans.server";
 import { groupOptions } from "../services/admin/setup.server";
 import { shopCurrency } from "../services/admin/tickets.server";
+import { storefrontChanged } from "../services/storefront/storefront-sync.server";
 
 async function findPlan(shopId: number, id: string | undefined) {
   return orNotFound(await prisma.carePlan.findFirst({ where: { id: parseId(id), shopId } }));
@@ -40,11 +41,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (field(form, "intent") === "delete") {
     if ((await prisma.cover.count({ where: { carePlanId: plan.id } })) > 0) {
       await prisma.carePlan.update({ where: { id: plan.id }, data: { active: false } });
+      await storefrontChanged(shop);
       return redirectWithFlash("/app/care_plans", {
         notice: "This plan has been sold, so it's been switched off rather than deleted.",
       });
     }
     await prisma.carePlan.delete({ where: { id: plan.id } });
+    await storefrontChanged(shop);
     return redirectWithFlash("/app/care_plans", { notice: "Care plan deleted." });
   }
   const base = planValues(plan, null);
@@ -55,6 +58,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     values,
     async () => {
       await updateCarePlan(plan.id, input);
+      await storefrontChanged(shop);
       return redirectWithFlash(`/app/care_plans/${plan.id}`, { notice: "Care plan saved." });
     },
     extra,

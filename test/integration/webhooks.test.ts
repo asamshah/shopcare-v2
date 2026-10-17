@@ -160,7 +160,11 @@ describe("Shopify webhooks", () => {
     const image = await createTicketImageFor(ticket.id);
     await storage.put(image.storageKey!, "jpeg");
     await storage.put("shops/1/tickets/1/postage-slip.pdf", "pdf");
+    const pending = { name: "webhook", shopDomain: shop.shopifyDomain, payload: { email: "a@example.com" } };
+    await prisma.job.create({ data: pending });
+    await prisma.job.create({ data: { ...pending, shopDomain: "other.myshopify.com" } });
     await deliver(shopRedact, "shop/redact", shop.shopifyDomain, {});
+    expect((await prisma.job.findMany()).map((e) => e.shopDomain)).toEqual(["other.myshopify.com"]);
     expect(await prisma.shop.count({ where: { id: shop.id } })).toBe(0);
     expect(await prisma.repairTicket.count({ where: { id: ticket.id } })).toBe(0);
     expect(await storage.get(image.storageKey!)).toBeNull();

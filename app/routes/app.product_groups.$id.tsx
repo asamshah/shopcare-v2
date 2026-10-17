@@ -10,6 +10,7 @@ import { orNotFound, parseId, requireAdmin } from "../services/admin/context.ser
 import { redirectWithFlash } from "../services/admin/flash.server";
 import { field, readForm } from "../services/admin/form.server";
 import { groupValues, readGroup } from "../services/admin/product-groups.server";
+import { storefrontChanged } from "../services/storefront/storefront-sync.server";
 
 async function findGroup(shopId: number, id: string | undefined) {
   return orNotFound(await prisma.productGroup.findFirst({ where: { id: parseId(id), shopId } }));
@@ -41,6 +42,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { values, input } = readGroup(form);
   return saveOr422(values, async () => {
     await updateProductGroup(group.id, input);
+    await storefrontChanged(shop);
     return redirectWithFlash("/app/product_groups", { notice: "Product group saved." });
   });
 };

@@ -11,7 +11,9 @@
  * `shop/redact` (redactShop, mandatory GDPR, ~48 h after uninstall): erases
  * the shop: its stored files (ticket photos, postage slips, registration
  * proofs, trade-in photos, GDPR exports), then the shop row, which cascades to every table,
- * and its sessions. Idempotent: a shop already gone is a no-op.
+ * its sessions and its saved jobs (`jobs` rows naming the shop, i.e. webhook
+ * payloads; keyed by domain, so no cascade). Idempotent: a shop already gone
+ * is a no-op.
  */
 import prisma from "../../db.server";
 import { getStorage, type FileStorage } from "../../lib/storage.server";
@@ -65,6 +67,7 @@ export async function redactShop(
   }: { db?: typeof prisma; storage?: FileStorage; logger?: Pick<Console, "warn" | "info"> } = {},
 ): Promise<{ deleted: boolean; files: number }> {
   await db.session.deleteMany({ where: { shop: shopDomain } });
+  await db.job.deleteMany({ where: { shopDomain } });
   const shop = await db.shop.findUnique({ where: { shopifyDomain: shopDomain } });
   if (!shop) return { deleted: false, files: 0 };
 

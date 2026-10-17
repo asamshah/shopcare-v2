@@ -7,11 +7,65 @@
   _shopcare_for so the cover attaches to the right item.
 {%- endcomment -%}
 
-{%- if product -%}
+{%- comment -%}
+  Which plans apply is decided here, from the app's storefront data
+  (app.metafields.shopcare.storefront: the active plans, each with its
+  product rule), so the product page doesn't call the app. Rules match as the
+  app's do: any of the group's collections or tags (case-insensitive), or the
+  product type. Without that data (not published yet, or another version)
+  the script asks the app instead (data-plans-url).
+{%- endcomment -%}
+{%- assign care_data = app.metafields.shopcare.storefront.value -%}
+{%- capture editor_note -%}
+  Care offer — only you see this, in the theme editor. No ShopCare Care plan covers this product, so customers don't see the block here. A plan covers the products in its product group (ShopCare → Care plans); preview a product it covers, or change the plan's products.
+{%- endcapture -%}
+{%- assign use_data = false -%}
+{%- if care_data.v == 1 -%}{%- assign use_data = true -%}{%- endif -%}
+{%- assign plan_count = 0 -%}
+{%- if use_data and product -%}
+  {%- assign product_type = product.type | downcase -%}
+  {%- capture plans_json -%}
+    {%- for plan in care_data.plans -%}
+      {%- assign applies = false -%}
+      {%- case plan.rule.type -%}
+        {%- when 'all' -%}
+          {%- assign applies = true -%}
+        {%- when 'collections' -%}
+          {%- for collection in product.collections -%}
+            {%- assign collection_id = collection.id | append: '' -%}
+            {%- if plan.rule.collection_ids contains collection_id -%}{%- assign applies = true -%}{%- endif -%}
+          {%- endfor -%}
+        {%- when 'tags' -%}
+          {%- for tag in product.tags -%}
+            {%- assign tag_down = tag | downcase -%}
+            {%- if plan.rule.tags contains tag_down -%}{%- assign applies = true -%}{%- endif -%}
+          {%- endfor -%}
+        {%- when 'product_type' -%}
+          {%- if plan.rule.product_type == product_type -%}{%- assign applies = true -%}{%- endif -%}
+      {%- endcase -%}
+      {%- if applies -%}
+        {%- if plan_count > 0 -%},{%- endif -%}
+        {{- plan | json -}}
+        {%- assign plan_count = plan_count | plus: 1 -%}
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endcapture -%}
+{%- endif -%}
+
+{%- if product -%}{%- if use_data and plan_count == 0 -%}
+  {%- comment -%} Customers see nothing; the merchant in the theme editor sees why. {%- endcomment -%}
+  {%- if request.design_mode -%}
+  <div class="shopcare-pdp shopcare-pdp--editor-note" {{ block.shopify_attributes }}>
+    <p class="shopcare-pdp__editor-note">{{ editor_note }}</p>
+  </div>
+  {%- endif -%}
+{%- else -%}
 <div
   class="shopcare-pdp"
   data-care-offer
   data-plans-url="/apps/repairs/care_plans?product_id={{ product.id }}&product_title={{ product.title | url_encode }}"
+  {%- if use_data %} data-plans-json="[{{ plans_json | escape }}]" data-currency="{{ care_data.currency | escape }}"{% endif %}
+  {%- if request.design_mode %} data-editor-note="{{ editor_note | escape }}"{% endif %}
   data-cart-add-url="{{ routes.cart_add_url }}.js"
   data-cart-url="{{ routes.cart_url }}"
   data-cart-change-url="{{ routes.cart_change_url }}.js"
@@ -37,8 +91,7 @@
   </div>
   <p class="shopcare-pdp__error" data-shopcare-error role="alert" hidden></p>
 </div>
-
-{%- endif -%}
+{%- endif -%}{%- endif -%}
 
 {% schema %}
 {

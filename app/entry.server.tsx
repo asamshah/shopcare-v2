@@ -2,7 +2,7 @@ import { PassThrough } from "stream";
 import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
 import { createReadableStreamFromReadable } from "@react-router/node";
-import { type EntryContext, type HandleErrorFunction } from "react-router";
+import { isRouteErrorResponse, type EntryContext, type HandleErrorFunction } from "react-router";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { reportError } from "./lib/errors.server";
@@ -10,11 +10,12 @@ import { reportError } from "./lib/errors.server";
 export const streamTimeout = 5000;
 
 /**
- * Unexpected loader/action errors (not thrown Responses, not aborted
- * requests) go to the error reporter (Sentry when SENTRY_DSN is set).
+ * Unexpected loader/action errors go to the error reporter (Sentry when
+ * SENTRY_DSN is set). Not aborted requests, and not route error responses
+ * such as a 404 for a URL no route matches (bots and probes hit those).
  */
 export const handleError: HandleErrorFunction = (error, { request }) => {
-  if (request.signal.aborted) return;
+  if (request.signal.aborted || isRouteErrorResponse(error)) return;
   void reportError(error, { area: "route", method: request.method, path: new URL(request.url).pathname });
 };
 

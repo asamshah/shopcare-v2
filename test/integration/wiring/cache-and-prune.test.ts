@@ -63,9 +63,14 @@ describe("daily prune", () => {
     await cache.set("old", 1, -1);
     await cache.set("fresh", 1, 60_000);
 
-    expect(await pruneStaleRows(t0)).toEqual({ throttles: 1, cacheEntries: 1, exports: 0 });
+    const job = { name: "webhook", status: "failed", payload: {} };
+    await prisma.job.create({ data: { ...job, lastError: "old", createdAt: new Date(t0.getTime() - 8 * 86_400_000) } });
+    await prisma.job.create({ data: { ...job, lastError: "recent", createdAt: new Date(t0.getTime() - 86_400_000) } });
+
+    expect(await pruneStaleRows(t0)).toEqual({ throttles: 1, cacheEntries: 1, exports: 0, jobs: 1 });
     expect((await prisma.proxyThrottle.findMany()).map((r) => r.key)).toEqual(["ping/acme/ip:1"]);
     expect((await prisma.cacheEntry.findMany()).map((r) => r.key)).toEqual(["fresh"]);
+    expect((await prisma.job.findMany()).map((r) => r.lastError)).toEqual(["recent"]);
   });
 
   it("is registered as the daily-prune job", async () => {

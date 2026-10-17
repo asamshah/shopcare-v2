@@ -48,7 +48,8 @@ or `deferred`.
 | Solid Queue / Solid Cache / Puma / Docker | Netlify Functions | done | `Dockerfile` kept from the template for self-hosting only |
 | `Rails.cache` (product facts, catalogue, repair products) | `cache_entries` table, `PostgresCache` (app/lib/postgres-cache.server.ts) | done | default `ShopifyCache` outside Vitest (in-memory under Vitest); TTL per caller; DB errors = cache miss |
 | `ProxyThrottling` (Rails.cache counters) | `proxy_throttles` table, `postgresThrottleStore` | done | default outside Vitest |
-| — (v2) daily housekeeping | `netlify/functions/daily-prune.mts` → job `daily-prune` | done | 03:15 UTC: throttle rows older than a day, expired cache entries |
+| — (v2) daily housekeeping | `netlify/functions/daily-prune.mts` → job `daily-prune` | done | 03:15 UTC: throttle rows older than a day, expired cache entries, jobs older than 7 days |
+| — (v2) saved jobs + sweep | `jobs` table, `app/lib/background.server.ts`, `netlify/functions/jobs-sweep.mts` | done | every `enqueue` is saved first and only its id is dispatched (256 KB background limit); claimed per run, deleted on success, backoff 1/2/10/30/120 min, `failed` + reported after 6 attempts; the sweep (every 5 min) sends due and crashed jobs again |
 | — (v2) error reporting | `app/lib/errors.server.ts` (`SENTRY_DSN`) | done | jobs that give up, failed dispatches and sweeps, loader/action errors (`handleError` in app/entry.server.tsx); tags only, no payloads |
 | — (v2) stuck-notification sweep | `netlify/functions/hourly-notification-sweep.mts` → job `notification-sweep` | done | hourly at :20: re-enqueues `pending` deliveries 15 min–48 h old |
 | — (v2) email unsubscribe + suppression | removed 16-10-2026 (Shopify sends every email; see [Notifications](#notifications)) | removed | migration `…_shopify_sends_emails` drops `email_suppressions` |

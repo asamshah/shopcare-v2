@@ -25,7 +25,10 @@ describe("background job signing", () => {
     expect(verifyJobSignature(body, "garbage", now)).toBe(false);
   });
 
-  it("only accepts envelopes for registered jobs", () => {
+  it("accepts a saved job's id, or an envelope for a registered job", () => {
+    expect(parseEnvelope(JSON.stringify({ jobId: 12 }))).toEqual({ jobId: 12 });
+    expect(parseEnvelope(JSON.stringify({ jobId: "12" }))).toBeNull();
+    expect(parseEnvelope(JSON.stringify({ jobId: -1 }))).toBeNull();
     expect(parseEnvelope(body)).toEqual({
       job: "example",
       payload: { message: "hi" },
@@ -52,33 +55,5 @@ describe("enqueue", () => {
     await enqueue("example", { message: "hello" });
     expect(info).toHaveBeenCalledWith("[job:example] hello");
   });
-
-  it("POSTs a signed envelope to the background function in netlify mode", async () => {
-    vi.stubEnv("BACKGROUND_DISPATCH", "netlify");
-    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await enqueue("example", { message: "hello" });
-
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [
-      string,
-      RequestInit,
-    ];
-    expect(url).toBe(
-      "https://shopcare.test/.netlify/functions/jobs-background",
-    );
-    const headers = init.headers as Record<string, string>;
-    expect(
-      verifyJobSignature(init.body as string, headers["x-shopcare-signature"]),
-    ).toBe(true);
-  });
-
-  it("throws when Netlify doesn't accept the invocation", async () => {
-    vi.stubEnv("BACKGROUND_DISPATCH", "netlify");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("nope", { status: 500 })),
-    );
-    await expect(enqueue("example", {})).rejects.toThrow(/HTTP 500/);
-  });
+  // Saving and dispatching (netlify / inline modes): test/integration/wiring/jobs.test.ts
 });

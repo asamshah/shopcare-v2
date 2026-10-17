@@ -733,3 +733,31 @@ model CacheEntry {
   @@index([expiresAt])
   @@map("cache_entries")
 }
+
+/// Background jobs (app/lib/background.server.ts). `enqueue()` saves the job
+/// here and sends the background function only its id, so a big payload (a
+/// Shopify webhook) fits Netlify's 256 KB request limit and a lost or failed
+/// run is retried by the sweep (netlify/functions/jobs-sweep.mts) instead of
+/// disappearing. A job is deleted when it succeeds; `failed` rows (out of
+/// attempts) and anything older than a week are pruned daily. Webhook jobs
+/// hold the payload, so shop/redact deletes the shop's rows.
+model Job {
+  id         Int       @id @default(autoincrement())
+  name       String
+  payload    Json      @db.JsonB
+  /// The shop's myshopify domain when the payload names one (webhooks).
+  shopDomain String?   @map("shop_domain")
+  /// "pending" | "running" | "failed"
+  status     String    @default("pending")
+  attempts   Int       @default(0)
+  lastError  String?   @map("last_error")
+  runAfter   DateTime  @default(now()) @map("run_after") @db.Timestamptz(6)
+  lockedAt   DateTime? @map("locked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, runAfter])
+  @@index([shopDomain])
+  @@index([createdAt])
+  @@map("jobs")
+}

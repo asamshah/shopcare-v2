@@ -30,9 +30,9 @@ import type { JobPayload } from "./registry.server";
 /**
  * Slow work for a Shopify webhook, after the route has acked it (Rails
  * ShopWebhookJob subclasses; see docs/BACKGROUND-WORK.md). The route checks
- * the HMAC and enqueues `{ topic, shop, payload, webhookId }`; this runs the
- * topic's handler with the shop's row. A shop that no longer exists is a
- * no-op, so Shopify's retries don't pile up. Every handler is idempotent:
+ * the HMAC and enqueues `{ topic, shop, payload, webhookId }` (saved as a
+ * `jobs` row); this runs the topic's handler with the shop's row. A shop that
+ * no longer exists is a no-op, so Shopify's retries don't pile up. Every handler is idempotent:
  * Shopify can deliver a webhook more than once and the background function
  * retries a failed run.
  *

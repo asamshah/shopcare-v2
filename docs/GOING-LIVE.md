@@ -85,7 +85,8 @@ To demo sooner, place a recent order (within 60 days) for the customer account.
 - `/apps/repairs/status` → `/proxy/status` (JSON for the **Repair status** block)
 - `/apps/repairs/quotes/:token` (+ `/decline`) → the quote review page,
   returned as `application/liquid` so it renders inside the theme
-- Subpath prefix `apps`, subpath `repairs`, proxy URL `https://<site>/proxy`
+- Subpath prefix `apps`, subpath `repairs`, proxy URL `/proxy` (relative: the
+  CLI prepends the app URL, so it's `https://<site>/proxy` once deployed)
   (unchanged from Rails, so the theme extension keeps working).
 
 ### Theme app extension (`extensions/repair-intake`)
@@ -273,10 +274,12 @@ export these recipes from the dev store to ship them as templates.
 
 ## Known dev-environment gotchas
 
-- **App Proxy URL is not auto-updated by `shopify app dev`** (only the app URL
-  and OAuth redirects are). The tunnel changes every restart, so update
-  `[app_proxy].url` and `shopify app deploy`, or use a stable tunnel:
-  `shopify app dev --tunnel-url=https://<static>.ngrok-free.app:3000`.
+- **App Proxy URL follows the tunnel**: `[app_proxy].url` is relative
+  (`/proxy`), so `shopify app dev` points it at each new tunnel and
+  `shopify app deploy` at `application_url`; no ngrok needed. While dev runs,
+  the proxy (like the app URL) points at your machine for every store with
+  the app installed. `--use-localhost` doesn't work for the storefront
+  blocks or webhooks: Shopify's servers can't reach localhost.
 - **react-router is pinned at 7.18.2**: 7.18.3+ rejects action POSTs under the
   dev tunnel (README → Gotchas).
 - **New customer accounts and `logged_in_customer_id`**: may be blank or

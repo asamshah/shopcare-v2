@@ -188,9 +188,9 @@ engine.
 npm run config:link     # shopify app config link → pick the existing ShopCare app
 ```
 
-In `shopify.app.toml` set `application_url`, `[auth].redirect_urls`
-(`https://<site>/auth/callback`) and `[app_proxy].url` (`https://<site>/proxy`)
-to the Netlify site, then:
+In `shopify.app.toml` set `application_url` and `[auth].redirect_urls`
+(`https://<site>/auth/callback`) to the Netlify site (`[app_proxy].url` is the
+relative `/proxy`, so the CLI points it at `application_url`), then:
 
 ```shell
 npm run deploy          # shopify app deploy: scopes, webhooks, App Proxy, extensions

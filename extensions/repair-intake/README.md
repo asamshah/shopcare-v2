@@ -156,7 +156,7 @@ wrong number, wrong email, someone else's order — returns the same “not foun
 jsdom against mocked endpoints (`cd test/storefront && npm ci && npm test`).
 
 ## Wiring required (needs the live app)
-1. App Proxy: prefix `apps`, subpath `repairs`, URL `https://<app-host>/proxy` (`shopify.app.toml`).
+1. App Proxy: prefix `apps`, subpath `repairs`, URL `/proxy` (`shopify.app.toml`; relative, so the CLI prepends the app URL).
 2. Deploy the extension (`shopify app deploy`) — **only with explicit approval.**
 3. In the theme editor: add **Care offer** to the product template, above the
    Add to cart button; add **Repair request** to a page, and/or switch on its

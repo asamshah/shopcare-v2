@@ -87,7 +87,10 @@ api_version = "2026-10"
 [app_proxy]
 # Storefront /apps/repairs/* → this app's /proxy/*. Keep the same prefix and
 # subpath as the Rails app so the theme extension's URLs still work.
-url = "https://example.com/proxy"
+# Relative on purpose: the CLI prepends the app URL, the tunnel on
+# `shopify app dev` and application_url on `shopify app deploy`.
+# https://shopify.dev/docs/apps/build/online-store/app-proxies
+url = "/proxy"
 subpath = "repairs"
 prefix = "apps"
 

@@ -32,7 +32,7 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "@netlify/blobs": "^11.1.3",
+    "@netlify/blobs": "^11.1.4",
     "@netlify/functions": "^6.0.2",
     "@netlify/vite-plugin-react-router": "^4.0.0",
     "@pdf-lib/fontkit": "^1.1.1",
